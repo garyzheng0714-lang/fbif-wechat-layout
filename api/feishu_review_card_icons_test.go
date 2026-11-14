@@ -341,10 +341,10 @@ func TestReviewBatchCardStaysWithinFeishuElementLimit(t *testing.T) {
 		t.Fatalf("四个平台应各一行: %s", cardJSON(t, box))
 	}
 
-	for len(jobs) < 20 && feishuCardElementCount(composeReviewBatchCard(jobs, icons)) <= feishuCardElementLimit {
+	for len(jobs) < 20 && feishuCardElementCount(composeReviewBatchCard(jobs, icons, false)) <= feishuCardElementLimit {
 		jobs = append(jobs, original(int64(len(jobs)+1)))
 	}
-	if feishuCardElementCount(composeReviewBatchCard(jobs, nil)) > feishuCardElementLimit {
+	if feishuCardElementCount(composeReviewBatchCard(jobs, nil, false)) > feishuCardElementLimit {
 		t.Fatalf("造的卡不带图标也超了，测不到去图标这一步（%d 篇）", len(jobs))
 	}
 	card := buildReviewBatchCardWithIcons(jobs, icons)
@@ -355,5 +355,88 @@ func TestReviewBatchCardStaysWithinFeishuElementLimit(t *testing.T) {
 	}
 	if !strings.Contains(body, "同步至腾讯号") {
 		t.Fatalf("去掉图标不能去掉按钮: %s", body)
+	}
+}
+
+// TestReviewBatchCardCompactsDistributionWhenStillOverLimit 不带图标还超（2026-11-14 #328：不带图标 193 个，
+// 再多一个平台或一篇原创就超）：分发区每个平台收成一行字、1 个组件，结果、链接、原因都在；「同步至X」
+// 「去修改」链到侧边栏改稿页，卡上不放按钮和表单；侧边栏改不了的（失败了、草稿已存进平台）照旧带按钮。
+// 平常一张卡最多 4 篇（7–11 月 127 天的最多值）：4 篇原创各 6 个平台、都待修改也放得下。
+func TestReviewBatchCardCompactsDistributionWhenStillOverLimit(t *testing.T) {
+	t.Setenv("AUTH_SESSION_SECRET", "test-session-secret")
+	accounts := []externalAccount{
+		testArticleAccount(testToutiaoAccountID, "toutiao", false), testArticleAccount(testBaijiaAccountID, "baijiahao", false),
+		testArticleAccount("recTestZhihu0001", "zhihu", false), testArticleAccount("recTestTencent01", "tencent", false),
+		testArticleAccount("recTestDayu00001", "dayu", false), testArticleAccount("recTestLinkedin1", "linkedin", false),
+	}
+	setTestExternalAccounts(t, accounts...)
+	icons := reviewCardTestIconKeys(t)
+	long := "这是一条明显超过了头条号三十个字上限的文章标题，需要编辑缩短以后再同步"
+	original := func(id int64) publishJob {
+		job := reviewCardTestJob(publishStagePublished)
+		job.ID, job.FoodTalksNewsID, job.PublicationAction = id, 7000+id, publishPublicationActionPublish
+		for _, account := range accounts {
+			job.ExternalDistributionDrafts = append(job.ExternalDistributionDrafts, publishExternalDraft{
+				AccountID: account.ID,
+				Issues:    []publishExternalIssue{{Field: publishExternalIssueTitle, Current: long, Length: runeLen(long), Min: 2, Max: 30}},
+			})
+		}
+		return job
+	}
+	jobs := []publishJob{original(1), original(2), original(3), original(4)}
+	// 一篇有一个平台失败了、草稿已存进平台：侧边栏改不了，只能按原样重推。
+	jobs[0].ExternalDistributionDrafts = jobs[0].ExternalDistributionDrafts[1:]
+	jobs[0].ExternalDistributionLanes = []publishExternalLane{{
+		AccountID: testToutiaoAccountID, Name: "头条号", Driver: externalDriverRobot, State: publishExternalDistributionFailed,
+		ContentPK: "pk-1", IntentKey: "job-1.toutiao", DraftURL: "https://mp.toutiao.com/profile_v4/graphic/publish?pgc_id=1", Error: "发布按钮没点上",
+		IntentAt: "2026-11-10T01:00:00Z", CompletedAt: "2026-11-10T01:05:00Z",
+	}}
+	if feishuCardElementCount(composeReviewBatchCard(jobs, nil, false)) <= feishuCardElementLimit || !reviewBatchCardCompact(jobs) {
+		t.Fatalf("造的卡不带图标没超，测不到收成一行字这一步")
+	}
+	card := buildReviewBatchCardWithIcons(jobs, icons)
+	body := panelJSON(t, card)
+	if n := feishuCardElementCount(card); n > feishuCardElementLimit {
+		t.Fatalf("收成一行字后仍有 %d 个组件", n)
+	}
+	if strings.Contains(body, `"tag":"form"`) || strings.Contains(body, `"tag":"input"`) {
+		t.Fatalf("收成一行字的卡不放改稿表单: %s", body)
+	}
+	if got := strings.Count(body, `"action":"`+feishuCardActionDistributeExternal+`"`); got != 1 {
+		t.Fatalf("只有侧边栏改不了的那一行留按钮，现在 %d 个: %s", got, body)
+	}
+	for _, want := range []string{"**知乎号**　<font color='orange'>待修改</font>", "[去修改](https://applink.feishu.cn/", "重新同步至头条号"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("收成一行字也要有 %q: %s", want, body)
+		}
+	}
+
+	// 只有一篇时照常是按钮和表单。
+	single := buildReviewBatchCardWithIcons(jobs[1:2], icons)
+	if reviewBatchCardCompact(jobs[1:2]) || !strings.Contains(cardJSON(t, single), `"tag":"form"`) {
+		t.Fatalf("放得下就不收: %s", cardJSON(t, single))
+	}
+
+	// 收成一行字的卡上没有改稿表单：待修改提醒指向侧边栏改稿页。
+	env := newPublishTestEnv(t)
+	for _, job := range jobs {
+		created, _, err := env.store.create(fmt.Sprintf("site:https://mp.weixin.qq.com/s/compact-%d", job.ID), "https://mp.weixin.qq.com/s/compact")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.store.update(created.ID, func(current *publishJob) {
+			id := current.ID
+			*current = job
+			current.ID = id
+			current.CreatedAt = jobs[0].CreatedAt
+			current.ReviewCardMsgIDs = map[string]string{"oc_review": fmt.Sprintf("om_%d", id)}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env.pipeline.reviewCardSentAt = func(context.Context, publishJob, string, string) (time.Time, error) { return time.Now(), nil }
+	stored, _ := env.store.byID(1)
+	if env.pipeline.externalReminderCardEditable(context.Background(), stored, "oc_review") {
+		t.Fatal("卡上收成了一行字，提醒不能叫人在卡片里改")
 	}
 }

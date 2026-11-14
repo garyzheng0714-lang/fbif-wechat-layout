@@ -612,7 +612,7 @@ func TestExternalCardExpiredIsTerminal(t *testing.T) {
 		t.Fatalf("过期卡应一次就停：state=%q err=%q calls=%d new=%d retried=%v", got.ExternalDistributionCardState, got.ExternalDistributionCardError, calls, newCards, retried)
 	}
 	var status publishMonitoringStatus
-	updatePublishMonitoringNotifications(&status, got, 60)
+	updatePublishMonitoringNotifications(&status, got, time.Now(), 60)
 	if status.NotificationDeadLetters != 0 || status.NotificationErrors != 0 || status.NotificationPending != 0 {
 		t.Fatalf("过期卡不算告警：%+v", status)
 	}
@@ -708,5 +708,59 @@ func TestAdminSyncIgnoresCardVersion(t *testing.T) {
 	}
 	if fmt.Sprint(robot.platforms) != "[baijiahao]" {
 		t.Fatalf("只推百家号：%v", robot.platforms)
+	}
+}
+
+// #328：分发区卡片更新进了死信，之后整张审核卡换成功（card-refresh 或别的更新）就收掉死信；
+// 有群的卡过了 14 天可更新期限记 expired；换卡后又排了新更新的不碰。
+func TestReviewCardRedrawSettlesExternalCardDeadLetter(t *testing.T) {
+	env := newPublishTestEnv(t)
+	create := func(key string, mutate func(*publishJob)) publishJob {
+		t.Helper()
+		job, _, err := env.store.create("site:https://mp.weixin.qq.com/s/"+key, "https://mp.weixin.qq.com/s/"+key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		job, err = env.store.update(job.ID, mutate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return job
+	}
+	dead := func(seq int64) func(*publishJob) {
+		return func(j *publishJob) {
+			j.Stage = publishStagePublished
+			j.ExternalDistributionCardState = publishExternalCardDeadLetter
+			j.ExternalDistributionCardSeq = seq
+			j.ExternalDistributionCardAttempts = publishExternalCardMaxAttempts
+			j.ExternalDistributionCardError = "更新审核群 oc_review 的卡片失败：code=230099 ErrCode: 11310; ErrMsg: card element exceeds the limit"
+		}
+	}
+	delivered := create("dead-a", dead(3))
+	expired := create("dead-b", dead(4))
+	requeued := create("dead-c", dead(5))
+	batch := []publishJob{delivered, requeued}
+	// 换卡之后、收死信之前又排了一次新更新：交给 outbox，不收。
+	if _, err := env.store.update(requeued.ID, func(j *publishJob) {
+		j.ExternalDistributionCardState, j.ExternalDistributionCardSeq = publishExternalCardPending, 6
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	env.pipeline.settleExternalCardDeadLetters(batch, false)
+	env.pipeline.settleExternalCardDeadLetters([]publishJob{expired}, true)
+
+	if got := mustJob(t, env, delivered.ID); got.ExternalDistributionCardState != "" || got.ExternalDistributionCardError != "" || got.ExternalDistributionCardUpdatedAt == "" {
+		t.Fatalf("整张卡换上了，死信收掉：%+v", got)
+	}
+	if got := mustJob(t, env, expired.ID); got.ExternalDistributionCardState != publishExternalCardExpired || got.ExternalDistributionCardError != "" {
+		t.Fatalf("卡过了 14 天记 expired：state=%q err=%q", got.ExternalDistributionCardState, got.ExternalDistributionCardError)
+	}
+	if got := mustJob(t, env, requeued.ID); got.ExternalDistributionCardState != publishExternalCardPending || got.ExternalDistributionCardSeq != 6 {
+		t.Fatalf("又排了新更新的不碰：state=%q seq=%d", got.ExternalDistributionCardState, got.ExternalDistributionCardSeq)
+	}
+	status := currentPublishMonitoring(env.store, false, time.Now())
+	if status.NotificationDeadLetters != 0 {
+		t.Fatalf("死信收掉后不再告警：%+v", status)
 	}
 }

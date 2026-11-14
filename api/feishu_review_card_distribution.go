@@ -37,13 +37,14 @@ const (
 )
 
 // reviewCardDistributionElements 根级元素：区标题，再是每篇原创一块。区标题上方不画分割线，
-// 只多留一段间距（2026-10-13 用户：「这根线可以不要」）。
-func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons) []any {
+// 只多留一段间距（2026-10-13 用户：「这根线可以不要」）。compact：卡片放不下时每个平台收成一行字
+// （见 buildReviewBatchCardWithIcons）。
+func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate bool, icons reviewCardIcons, compact bool) []any {
 	cfg, _ := loadExternalTargets()
 	heading := aggregate && len(jobs) > 1
 	var body []any
 	for _, job := range jobs {
-		body = append(body, reviewCardDistributionGroup(job, cfg.forJob(job), allowStart, aggregate, heading, icons)...)
+		body = append(body, reviewCardDistributionGroup(job, cfg.forJob(job), allowStart, aggregate, heading, icons, compact)...)
 	}
 	if len(body) == 0 {
 		return nil
@@ -55,10 +56,10 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 
 // reviewCardExternalDistributionElements 单篇卡（降级路径）的分发区，与聚合卡同一写法。
 func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []any {
-	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil)
+	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil, false)
 }
 
-func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allowStart, aggregate, heading bool, icons reviewCardIcons) []any {
+func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allowStart, aggregate, heading bool, icons reviewCardIcons, compact bool) []any {
 	started := externalDistributionStarted(job)
 	switch {
 	case job.Stage == publishStagePublished:
@@ -90,6 +91,10 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 		return nil
 	}
 	canStart := allowStart && open
+	row := reviewCardPlatformRow
+	if compact {
+		row = reviewCardPlatformLine
+	}
 	var rows []any
 	fixing := false
 	seen := map[string]bool{}
@@ -98,17 +103,17 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 		if _, ok := externalLaneFor(job, target.ID); !ok && !open {
 			continue // 不外发的稿只列已经发过的号
 		}
-		row, rowFixing := reviewCardPlatformRow(job, target, true, canStart, icons)
-		rows = append(rows, row)
-		fixing = fixing || rowFixing
+		line, lineFixing := row(job, target, true, canStart, icons)
+		rows = append(rows, line)
+		fixing = fixing || lineFixing
 	}
 	for _, lane := range job.ExternalDistributionLanes {
 		if seen[strings.TrimSpace(lane.AccountID)] {
 			continue
 		}
 		// 表里已停用（或不再发这个公众号）的号：只展示结果，不给操作。
-		row, _ := reviewCardPlatformRow(job, externalAccount{ID: lane.AccountID, Name: lane.Name, Label: lane.Name}, false, false, icons)
-		rows = append(rows, row)
+		line, _ := row(job, externalAccount{ID: lane.AccountID, Name: lane.Name, Label: lane.Name}, false, false, icons)
+		rows = append(rows, line)
 	}
 	if len(rows) == 0 {
 		return nil
@@ -228,6 +233,41 @@ func reviewCardPlatformRow(job publishJob, target externalAccount, configured, c
 			"vertical_spacing": "6px", "elements": elements,
 		}},
 	}, fixing
+}
+
+// reviewCardPlatformLine 卡片放不下时（buildReviewBatchCardWithIcons 第 3 级）一个平台只占一行字、
+// 1 个组件：名字、文章链接、状态，原因接在后面。能同步的「同步至X」、待修改的「去修改」都链到侧边栏
+// 改稿页，在那里点「保存并同步至X」（与卡片表单同一个入口）。侧边栏改不了的（失败了、草稿已存进平台，
+// 只能按原样重推）照旧给一行带按钮的，这种很少。
+func reviewCardPlatformLine(job publishJob, target externalAccount, configured, canStart bool, icons reviewCardIcons) (map[string]any, bool) {
+	state := externalPlatformStatus(job, target)
+	editLink := externalDistributionSidebarLink(job.ID)
+	actionable := canStart && configured && state.Syncable && !state.NeedsFix
+	if actionable && (!state.Editable || editLink == "") {
+		return reviewCardPlatformRow(job, target, configured, canStart, nil)
+	}
+	profile := platformForAccount(target)
+	name := reviewCardSafeText(target.label(), 20)
+	if name == "" {
+		name = "未命名平台"
+	}
+	parts := []string{"**" + name + "**"}
+	if link := reviewCardPlatformArticleLink(job, state, name); link != "" {
+		parts = append(parts, link)
+	}
+	if actionable {
+		text := profile.syncAction(name)
+		if state.Status == "失败" {
+			text = "重新" + text
+		}
+		parts = append(parts, "["+text+"]("+editLink+")")
+	} else {
+		parts = append(parts, "<font color='"+state.Tone+"'>"+state.Status+"</font>")
+	}
+	if line := reviewCardPlatformReason(state, false, actionable, editLink); line != "" {
+		parts = append(parts, line)
+	}
+	return map[string]any{"tag": "markdown", "content": strings.Join(parts, "　")}, false
 }
 
 // reviewCardPlatformArticleLink 名字后面的文章链接：平台改过标题就写平台上的标题，否则「查看文章」。

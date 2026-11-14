@@ -504,7 +504,35 @@ func (p *publishPipeline) sendConfiguredReviewCardToTargets(ctx context.Context,
 			}
 		}
 	}
+	p.settleExternalCardDeadLetters(batch, expired != nil)
 	return expired
+}
+
+// settleExternalCardDeadLetters 每个群的卡都照这批稿现在的样子整张换过了：之前分发区没更新上、
+// 进了死信的那次更新已经包含在里面，死信收掉；有群的卡过了飞书 14 天可更新期限的照红线 34 记 expired。
+// #328：卡片超限那 10 次进了死信，修好后 card-refresh 换上了新卡，死信却一直挂着、monitoring 一直告警。
+// 只收这次换卡时已经是死信、之后也没再排新更新的（seq 没变）。
+func (p *publishPipeline) settleExternalCardDeadLetters(batch []publishJob, expired bool) {
+	for _, candidate := range batch {
+		if candidate.ExternalDistributionCardState != publishExternalCardDeadLetter {
+			continue
+		}
+		seq := candidate.ExternalDistributionCardSeq
+		_, _, err := p.store.updateIf(candidate.ID, func(current publishJob) bool {
+			return current.ExternalDistributionCardState == publishExternalCardDeadLetter && current.ExternalDistributionCardSeq == seq
+		}, func(current *publishJob) {
+			current.ExternalDistributionCardError = ""
+			if expired {
+				current.ExternalDistributionCardState = publishExternalCardExpired
+				return
+			}
+			current.ExternalDistributionCardState = ""
+			current.ExternalDistributionCardUpdatedAt = pipelineNow(p).Format(time.RFC3339)
+		})
+		if err != nil {
+			log.Printf("publish: 收 #%d 分发区卡片死信失败：%v", candidate.ID, err)
+		}
+	}
 }
 
 func (p *publishPipeline) buildReviewBatchCard(ctx context.Context, jobID int64) (map[string]any, error) {

@@ -167,6 +167,7 @@ func main() {
 	if publishWorkersPaused() {
 		log.Printf("publish: 候选部署暂停态，跳过任务恢复、通知 outbox、状态推送与飞书长连接")
 	} else {
+		publishPipe.startPublishMonitorWake()
 		publishPipe.recoverJobs()
 		publishStore.statusCallbacks.startSending()
 		publishPipe.startCMSPublicationSync()

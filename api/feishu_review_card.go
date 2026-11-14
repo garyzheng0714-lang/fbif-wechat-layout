@@ -52,22 +52,40 @@ func buildReviewBatchCard(jobs []publishJob) map[string]any {
 const feishuCardElementLimit = 200
 
 // buildReviewBatchCardWithIcons icons 为当前审核应用的按钮图标 img_key；缺图标的按钮
-// 照常无图标（见 feishu_review_card_icons.go）。图标是点缀，不能把卡顶过飞书的组件上限：
-// 超了就整张不带图标（2026-11-10 #326–#328 一天两篇原创、四个平台，带图标 209 个，更新被拒、
-// 卡片停在接腾讯号之前的样子）；不带图标还超只记日志，交给人看要不要再精简版式。
+// 照常无图标（见 feishu_review_card_icons.go）。卡片不能超飞书的组件上限，按这个顺序一级级收：
+//  1. 照常带图标；
+//  2. 超了整张不带图标（2026-11-10 #326–#328 一天两篇原创、四个平台，带图标 209 个，更新被拒、
+//     卡片停在接腾讯号之前的样子）；
+//  3. 还超，分发区每个平台收成一行字（reviewCardPlatformLine，先带图标再不带）：结果、链接、原因都在，
+//     「同步至X」和改稿表单换成侧边栏改稿页的链接（2026-11-14：#328 那张不带图标还有 193 个，再多一个
+//     平台或一篇原创就超）。一个平台一行字只占 1 个组件，平常最多 4 篇一张卡（7–11 月 127 天的最多值），
+//     4 篇原创各 6 个平台也只有 160 来个；
+//  4. 还超只记日志，交给人看要不要再精简版式。
 func buildReviewBatchCardWithIcons(jobs []publishJob, icons reviewCardIcons) map[string]any {
-	card := composeReviewBatchCard(jobs, icons)
-	if len(icons) > 0 && feishuCardElementCount(card) > feishuCardElementLimit {
-		card = composeReviewBatchCard(jobs, nil)
-	}
-	if n := feishuCardElementCount(card); n > feishuCardElementLimit {
-		ids := make([]string, 0, len(jobs))
-		for _, job := range jobs {
-			ids = append(ids, "#"+strconv.FormatInt(job.ID, 10))
+	var card map[string]any
+	for _, compact := range []bool{false, true} {
+		for _, withIcons := range []reviewCardIcons{icons, nil} {
+			card = composeReviewBatchCard(jobs, withIcons, compact)
+			if feishuCardElementCount(card) <= feishuCardElementLimit {
+				return card
+			}
+			if len(icons) == 0 {
+				break
+			}
 		}
-		log.Printf("publish: WARN 审核卡 %s 有 %d 个组件，超过飞书上限 %d，发卡或更新会被拒", strings.Join(ids, " "), n, feishuCardElementLimit)
 	}
+	ids := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		ids = append(ids, "#"+strconv.FormatInt(job.ID, 10))
+	}
+	log.Printf("publish: WARN 审核卡 %s 收成一行字还有 %d 个组件，超过飞书上限 %d，发卡或更新会被拒",
+		strings.Join(ids, " "), feishuCardElementCount(card), feishuCardElementLimit)
 	return card
+}
+
+// reviewBatchCardCompact 这一批的卡分发区收成了一行字（卡上没有同步按钮和改稿表单，见上面第 3 级）。
+func reviewBatchCardCompact(jobs []publishJob) bool {
+	return feishuCardElementCount(composeReviewBatchCard(jobs, nil, false)) > feishuCardElementLimit
 }
 
 // feishuCardElementCount 按飞书的数法数卡里的元素和组件：带 tag 的都算（文本元素、图标也算）。
@@ -93,7 +111,7 @@ func feishuCardElementCount(node any) int {
 	return n
 }
 
-func composeReviewBatchCard(jobs []publishJob, icons reviewCardIcons) map[string]any {
+func composeReviewBatchCard(jobs []publishJob, icons reviewCardIcons, compact bool) map[string]any {
 	elements := make([]any, 0, len(jobs)+1)
 	pending, published := 0, 0
 	for _, job := range jobs {
@@ -109,7 +127,7 @@ func composeReviewBatchCard(jobs []publishJob, icons reviewCardIcons) map[string
 		elements = append(elements, risk)
 	}
 	// 分发区在最底下、常显，区标题上方不画分割线（2026-10-12/13 用户裁定，见 feishu_review_card_distribution.go）。
-	elements = append(elements, reviewCardDistributionElements(jobs, true, true, icons)...)
+	elements = append(elements, reviewCardDistributionElements(jobs, true, true, icons, compact)...)
 	card := map[string]any{
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},

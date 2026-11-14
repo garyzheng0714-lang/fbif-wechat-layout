@@ -257,6 +257,15 @@ type publishJobStore struct {
 	path string
 	// statusCallbacks 写盘后有新的一版状态要推就叫醒它（nil 时不推，测试装配默认如此）。
 	statusCallbacks *publishStatusCallbacks
+	// written 每次写盘成功后调一下（叫醒看门狗的告警重算，publish_monitor_wake.go）；在锁里调，不许堵。
+	written func()
+}
+
+// onWrite 登记写盘后的回调；锁里改，免得和正在写盘的 goroutine 抢。
+func (s *publishJobStore) onWrite(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.written = fn
 }
 
 // publishJobsPath 存储路径：env PUBLISH_JOBS_PATH 优先；否则跟随规则存储所在目录
@@ -341,7 +350,13 @@ func (s *publishJobStore) writeLocked(doc publishJobDocument) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		return err
+	}
+	if s.written != nil {
+		s.written()
+	}
+	return nil
 }
 
 // create 建单 + source_key 永久幂等收敛：同 key 只允许存在一条任务，包含 published /

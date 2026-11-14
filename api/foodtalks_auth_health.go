@@ -12,6 +12,17 @@ type foodTalksAuthHealth struct {
 	seq      uint64
 	lastOK   uint64
 	lastFail uint64
+	// flipped 结论从有效翻成失效或反过来时调（叫醒看门狗，publish_monitor_wake.go）；放锁后调。
+	flipped func()
+}
+
+func (h *foodTalksAuthHealth) onFlip(fn func()) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.flipped = fn
 }
 
 func (h *foodTalksAuthHealth) record(ok bool) {
@@ -19,12 +30,18 @@ func (h *foodTalksAuthHealth) record(ok bool) {
 		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	was := h.lastFail > h.lastOK
 	h.seq++
 	if ok {
 		h.lastOK = h.seq
 	} else {
 		h.lastFail = h.seq
+	}
+	flipped := h.flipped
+	changed := was != (h.lastFail > h.lastOK)
+	h.mu.Unlock()
+	if changed && flipped != nil {
+		flipped()
 	}
 }
 

@@ -359,7 +359,7 @@ func TestPublishNotificationExpiredCardIsTerminal(t *testing.T) {
 			got.NotificationState, got.NotificationError, calls, newCards, texts, retried)
 	}
 	var status publishMonitoringStatus
-	updatePublishMonitoringNotifications(&status, got, 60)
+	updatePublishMonitoringNotifications(&status, got, time.Now(), 60)
 	if status.NotificationDeadLetters != 0 || status.NotificationErrors != 0 || status.NotificationPending != 0 {
 		t.Fatalf("过期卡不算告警：%+v", status)
 	}

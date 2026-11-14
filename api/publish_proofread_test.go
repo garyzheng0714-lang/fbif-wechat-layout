@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testProofreadBody = "近期推出的“不使用西柚的西柚味100%果汁”，也是类似的出发点：农业水产省数据显示，西柚进口量持续下降。"
@@ -213,7 +214,7 @@ func TestProofreadReminderWaitsForReviewCard(t *testing.T) {
 		t.Fatalf("卡片没发之前不复核：%+v", *calls)
 	}
 	var waiting publishMonitoringStatus
-	updatePublishMonitoringNotifications(&waiting, got, 0)
+	updatePublishMonitoringNotifications(&waiting, got, time.Now(), 0)
 	if waiting.NotificationPending != 0 {
 		t.Fatalf("等审核卡的提醒不算积压通知：%+v", waiting)
 	}
@@ -276,7 +277,7 @@ func TestProofreadReminderFailureRetriesAndCountsInMonitoring(t *testing.T) {
 		t.Fatalf("失败应保留 pending 并记错误（复核结果留着，重试不再调模型）：%+v", r)
 	}
 	var status publishMonitoringStatus
-	updatePublishMonitoringNotifications(&status, got, 0)
+	updatePublishMonitoringNotifications(&status, got, time.Now(), 0)
 	if status.NotificationErrors != 1 || status.NotificationPending != 1 {
 		t.Fatalf("失败要进监控：%+v", status)
 	}

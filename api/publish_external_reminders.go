@@ -352,8 +352,12 @@ func (p *publishPipeline) sendExternalReminderToChat(ctx context.Context, job pu
 
 // externalReminderCardEditable 这个群里的审核卡还能在卡片里改。#233：补发九月旧稿时卡片早已过期，
 // 卡上没有改稿按钮，提醒却叫人去点。读不到发送时间时按改不了处理——改稿页卡片新旧都能用。
+// 卡片放不下、分发区收成了一行字的（reviewBatchCardCompact）卡上也没有改稿表单。
 func (p *publishPipeline) externalReminderCardEditable(ctx context.Context, job publishJob, chatID string) bool {
 	if job.NotificationState == publishNotificationStateExpired || job.ExternalDistributionCardState == publishExternalCardExpired {
+		return false
+	}
+	if batch, err := p.reviewCardBatch(job); err != nil || reviewBatchCardCompact(batch) {
 		return false
 	}
 	parent := p.reviewCardMessageIDForChat(job, chatID)

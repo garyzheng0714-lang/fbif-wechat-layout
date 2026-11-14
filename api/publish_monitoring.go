@@ -57,6 +57,9 @@ type publishMonitoringStatus struct {
 	AlertIssues []string `json:"alert_issues"`
 
 	failedUnresolved int
+	// nextChange 下一个只靠时间流逝就可能让告警翻转的时刻（处理中满 20 分钟、近期失败满 24 小时……）；
+	// 零值表示没有。叫醒看门狗（publish_monitor_wake.go）到这一刻重算一次，不按固定间隔去问。
+	nextChange time.Time
 }
 
 type publishMonitoringLevel uint8
@@ -71,6 +74,19 @@ type publishMonitoringSignal struct {
 	condition bool
 	message   string
 	levels    publishMonitoringLevel
+}
+
+// changesWhenOlderThan 一件事现在 age 秒、满 limit 才算告警：记下它跨过去的那一刻。已经跨过去的不用记。
+func (s *publishMonitoringStatus) changesWhenOlderThan(now time.Time, age int64, limit time.Duration) {
+	limitSeconds := int64(limit / time.Second)
+	if age > limitSeconds {
+		return
+	}
+	// 判定是 age > limit（按整秒），所以到 limit 再过一秒才翻。
+	at := now.Add(time.Duration(limitSeconds-age+1) * time.Second)
+	if s.nextChange.IsZero() || at.Before(s.nextChange) {
+		s.nextChange = at
+	}
 }
 
 // credentialInvalid 来自最近一次 FoodTalks 鉴权结论：它不依赖任务积压，
@@ -100,7 +116,7 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 	for _, job := range jobs {
 		age := publishMonitoringAge(now, job.UpdatedAt)
 		updatePublishMonitoringWork(&status, job, now, age)
-		updatePublishMonitoringNotifications(&status, job, age)
+		updatePublishMonitoringNotifications(&status, job, now, age)
 		updatePublishMonitoringFailures(&status, job, now)
 		updatePublishMonitoringReconciliation(&status, job, now, age)
 		mismatched, unavailable := externalFidelityMonitoring(job, now)
@@ -127,7 +143,9 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 		switch {
 		case lane.State == publishExternalDistributionPublishing:
 			publishing = true
-			if age := publishMonitoringAge(now, publishExternalLaneEnteredAt(lane)); age > status.OldestExternalPublishingAgeSeconds {
+			age := publishMonitoringAge(now, publishExternalLaneEnteredAt(lane))
+			status.changesWhenOlderThan(now, age, publishExternalPublishingCriticalAfter)
+			if age > status.OldestExternalPublishingAgeSeconds {
 				status.OldestExternalPublishingAgeSeconds = age
 			}
 		case lane.State == publishExternalDistributionReviewing:
@@ -146,6 +164,9 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 			processingAge = resyncAge
 		}
 	}
+	if processingAge >= 0 {
+		status.changesWhenOlderThan(now, processingAge, publishProcessingCriticalAfter)
+	}
 	if processingAge >= 0 || publishing {
 		status.Processing++
 		if processingAge > status.OldestProcessingAgeSeconds {
@@ -153,6 +174,7 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 		}
 	}
 	if job.Stage == publishStageCreated {
+		status.changesWhenOlderThan(now, age, publishQueueCriticalAfter)
 		status.Queued++
 		if age > status.OldestQueueAgeSeconds {
 			status.OldestQueueAgeSeconds = age
@@ -160,7 +182,7 @@ func updatePublishMonitoringWork(status *publishMonitoringStatus, job publishJob
 	}
 }
 
-func updatePublishMonitoringNotifications(status *publishMonitoringStatus, job publishJob, age int64) {
+func updatePublishMonitoringNotifications(status *publishMonitoringStatus, job publishJob, now time.Time, age int64) {
 	pending := boolInt(job.NotificationState == publishNotificationStatePending || job.NotificationState == publishNotificationStateSending)
 	pending += boolInt(job.ExternalDistributionCardState == publishExternalCardPending || job.ExternalDistributionCardState == publishExternalCardSending)
 	// 外发待修改提醒（回复在审核卡下、@ 作者或分发负责人）同样是持久通知。
@@ -171,6 +193,9 @@ func updatePublishMonitoringNotifications(status *publishMonitoringStatus, job p
 	pending += boolInt((proofread.State == publishExternalCardPending && !publishProofreadAwaitingCard(job)) ||
 		proofread.State == publishExternalCardSending)
 	status.NotificationPending += pending
+	if pending > 0 {
+		status.changesWhenOlderThan(now, age, publishNotificationCriticalAfter)
+	}
 	if pending > 0 && age > status.OldestNotificationAgeSeconds {
 		status.OldestNotificationAgeSeconds = age
 	}
@@ -203,6 +228,8 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 		}
 		// 系统还会自己重推的（前 3 次退避没用完）先不算失败：连续 3 次没成才找人。
 		if externalLaneAwaitingAutoRetry(job, lane, now) {
+			// 过了 7 天系统就不再自己重推，那一刻起算失败。
+			status.changesWhenOlderThan(now, publishMonitoringAge(now, lane.RequestedAt), externalAutoRetryWindow)
 			continue
 		}
 		externalFailed = true
@@ -218,14 +245,19 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 	status.Failed += boolInt(jobFailed) + boolInt(externalFailed) + boolInt(resyncFailed)
 	// 主发布仍停在 failed 就尚未闭环，不得因超过近期窗口而停止告警。
 	status.failedUnresolved += boolInt(jobFailed)
-	if jobFailed && publishMonitoringIsRecent(now, job.UpdatedAt) {
-		status.FailedRecent++
-	}
-	if externalFailed && publishMonitoringIsRecent(now, externalFailedWhen) {
-		status.FailedRecent++
-	}
-	if resyncFailed && publishMonitoringIsRecent(now, firstNonEmpty(job.SourceResyncCompletedAt, job.UpdatedAt)) {
-		status.FailedRecent++
+	for _, failure := range []struct {
+		failed bool
+		at     string
+	}{
+		{jobFailed, job.UpdatedAt},
+		{externalFailed, externalFailedWhen},
+		{resyncFailed, firstNonEmpty(job.SourceResyncCompletedAt, job.UpdatedAt)},
+	} {
+		if failure.failed && publishMonitoringIsRecent(now, failure.at) {
+			status.FailedRecent++
+			// 过了近期窗口就不再算近期失败：那一刻告警可能少一类。
+			status.changesWhenOlderThan(now, publishMonitoringAge(now, failure.at), publishRecentFailureWindow)
+		}
 	}
 }
 
@@ -237,6 +269,9 @@ func updatePublishMonitoringReconciliation(status *publishMonitoringStatus, job 
 	}
 	resyncRequired := job.SourceResyncState == publishSourceResyncReconciliationRequired
 	status.ReconciliationRequired += boolInt(stageRequired) + boolInt(externalRequired) + boolInt(resyncRequired)
+	if stageRequired || externalRequired {
+		status.changesWhenOlderThan(now, age, publishReconciliationCriticalAfter)
+	}
 	if stageRequired && age > status.OldestReconciliationAgeSeconds {
 		status.OldestReconciliationAgeSeconds = age
 	}
@@ -245,6 +280,7 @@ func updatePublishMonitoringReconciliation(status *publishMonitoringStatus, job 
 	}
 	if resyncRequired {
 		resyncAge := publishMonitoringAge(now, publishSourceResyncStartedAt(job))
+		status.changesWhenOlderThan(now, resyncAge, publishReconciliationCriticalAfter)
 		if resyncAge > status.OldestReconciliationAgeSeconds {
 			status.OldestReconciliationAgeSeconds = resyncAge
 		}

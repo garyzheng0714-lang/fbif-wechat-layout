@@ -574,13 +574,13 @@ func TestExternalReminderExpiredCardPointsToSidebar(t *testing.T) {
 func TestExternalReminderFailureCountsInMonitoring(t *testing.T) {
 	job := publishJob{ExternalDistributionReminder: publishExternalReminder{State: publishExternalCardDeadLetter, Error: "飞书回复消息失败"}}
 	var status publishMonitoringStatus
-	updatePublishMonitoringNotifications(&status, job, 60)
+	updatePublishMonitoringNotifications(&status, job, time.Now(), 60)
 	if status.NotificationDeadLetters != 1 || status.NotificationErrors != 1 {
 		t.Fatalf("提醒死信应计入监控：%+v", status)
 	}
 	job.ExternalDistributionReminder = publishExternalReminder{State: publishExternalCardPending}
 	status = publishMonitoringStatus{}
-	updatePublishMonitoringNotifications(&status, job, 60)
+	updatePublishMonitoringNotifications(&status, job, time.Now(), 60)
 	if status.NotificationPending != 1 {
 		t.Fatalf("待发提醒应计入监控：%+v", status)
 	}
