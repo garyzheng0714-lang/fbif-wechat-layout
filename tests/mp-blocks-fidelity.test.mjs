@@ -41,8 +41,8 @@ function fbifV2Module() {
   return {
     schema_version: 2, enabled: true, active_preset_id: 'original',
     presets: [
-      { id: 'original', name: '原创', order, blocks: shared(textB('* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）', false, 15, '#888888', 'left')) },
-      { id: 'repost', name: '转载', order, blocks: shared(textB('* 本文为转载文章。\n* FBIF投稿与商务合作，联系Bobo（微信：fbifmedia1）', false, 15, '#888888', 'left')) },
+      { id: 'original', name: '原创', order, blocks: shared(textB('* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（ID：fbifmedia1）', false, 15, '#888888', 'left')) },
+      { id: 'repost', name: '转载', order, blocks: shared(textB('* 本文为转载文章。\n* FBIF投稿与商务合作，联系Bobo（ID：fbifmedia1）', false, 15, '#888888', 'left')) },
     ],
   };
 }
