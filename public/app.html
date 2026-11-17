@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="/admin-panel.css">
 <link rel="stylesheet" href="/css/rule-admin.css">
 <link rel="stylesheet" href="/css/app-shell.css">
+<link rel="stylesheet" href="/css/article-check.css">
 <link rel="stylesheet" href="/css/auth-editor.css">
 <link rel="stylesheet" href="/css/wx-theme.css">
 </head>
@@ -116,6 +117,7 @@
       </div>
 
       <div class="error" id="error"></div>
+      <div id="articleCheck" hidden></div>
       <div class="ma-section" id="moreArticlesSection" style="display:none;">
         <div id="moreArticlesEmbed">
           <!-- 这段会被 block-panel 摘进「更多文章」区块里，那里已经有区块标题，所以这里不再重复标题。 -->
@@ -889,6 +891,16 @@ feishuDocImport = mountFeishuDocumentImport({
   createProgressTracker: () => createFeishuImportProgressTracker({ documentRef: document }),
 });
 window._feishuDocImport = feishuDocImport;
+
+// 左栏「AI 校对」卡：文章排好自动查错别字和风险，点改正走引擎重排。
+const { mountArticleCheck } = await import('/js/article-check.js?v=' + assetVersion);
+mountArticleCheck({
+  mount: document.getElementById('articleCheck'),
+  titleEl: document.getElementById('articleTitle'),
+  contentEl: document.getElementById('contentArea'),
+  getSession: () => window._engineApi.getArticleSession(),
+  setTextFixes: fixes => window._engineApi.setTextFixes(fixes),
+});
 
 // 启动到这里，账号、载体、规则、上次的稿子、左栏都就位了才露出页面，不让人看到半成品再变样（卡住时 auth-editor.css 兜底）。
 document.body.classList.remove('boot-pending');

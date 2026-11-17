@@ -1,0 +1,222 @@
+/* 左栏「校对」卡（public/js/article-check.js）和它在预览里画的线。
+   线用 CSS Custom Highlight 画：不动预览的 DOM，不进复制的内容。 */
+.proof-card {
+  display: flex;
+  flex-direction: column;
+  /* 左右 15px：与上面导入卡里的字、按钮同一条左边线和右边线 */
+  padding: 10px 15px;
+  border-radius: var(--fs-r-m);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s1);
+}
+.proof-card[hidden] {
+  display: none;
+}
+.proof-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.proof-title {
+  margin-right: auto;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fs-text-1);
+}
+.proof-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fs-text-3);
+}
+.proof-state.is-clean {
+  color: var(--fs-success);
+}
+.proof-state.is-failed {
+  color: var(--fs-danger);
+}
+.proof-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--fs-r-full);
+  border: 2px solid var(--fs-border-control);
+  border-top-color: var(--fs-brand);
+  animation: proof-spin 0.8s linear infinite;
+}
+@keyframes proof-spin {
+  to { transform: rotate(360deg); }
+}
+.proof-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.proof-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--fs-divider);
+}
+.proof-list > .proof-row:last-child {
+  padding-bottom: 2px;
+}
+.proof-where {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fs-r-xs);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.proof-where:focus-visible,
+.proof-button:focus-visible,
+.proof-notes summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
+.proof-line {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--fs-text-1);
+  overflow-wrap: anywhere;
+}
+/* 改法一行：错的 → 对的。「应为」只给读屏用。 */
+.proof-wrong {
+  font-weight: 400;
+  color: var(--fs-text-2);
+}
+.proof-arrow {
+  margin: 0 6px;
+  font-weight: 400;
+  color: var(--fs-text-3);
+}
+.proof-arrow-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.proof-evidence {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fs-text-3);
+  overflow-wrap: anywhere;
+}
+.proof-evidence mark {
+  background: none;
+  color: inherit;
+  text-decoration: underline wavy var(--fs-danger);
+  text-underline-offset: 3px;
+}
+.proof-where:hover .proof-line {
+  color: var(--fs-brand);
+}
+.proof-row.is-done .proof-line,
+.proof-row.is-done .proof-wrong {
+  font-weight: 400;
+  color: var(--fs-text-3);
+}
+.proof-row.is-done .proof-evidence mark {
+  text-decoration: none;
+}
+.proof-flag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: var(--fs-r-xs);
+  background: var(--fs-danger-soft);
+  color: var(--fs-danger);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  vertical-align: 1px;
+}
+.proof-button {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--fs-r-s);
+  background: var(--fs-bg-card);
+  box-shadow: inset 0 0 0 1px var(--fs-border-control);
+  color: var(--fs-text-1);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--fs-t-fast) var(--fs-ease-out),
+              color var(--fs-t-fast) var(--fs-ease-out),
+              box-shadow var(--fs-t-fast) var(--fs-ease-out),
+              transform var(--fs-t-fast) var(--fs-ease-out);
+}
+.proof-button:hover {
+  background: var(--fs-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--fs-text-3);
+}
+.proof-button:active {
+  transform: scale(0.98);
+}
+.proof-button:disabled {
+  color: var(--fs-text-disabled);
+  cursor: default;
+  transform: none;
+}
+.proof-button.is-quiet {
+  box-shadow: none;
+  color: var(--fs-text-2);
+}
+.proof-button.is-quiet:hover {
+  color: var(--fs-text-1);
+}
+.proof-notes {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--fs-divider);
+}
+.proof-head + .proof-notes {
+  border-top: 0;
+  padding-top: 0;
+}
+.proof-notes summary {
+  width: fit-content;
+  border-radius: var(--fs-r-xs);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fs-text-2);
+  cursor: pointer;
+}
+.proof-notes .proof-line {
+  font-weight: 400;
+}
+
+::highlight(proof-error) {
+  text-decoration: underline wavy var(--fs-danger);
+  text-underline-offset: 3px;
+}
+::highlight(proof-issue) {
+  text-decoration: underline wavy var(--fs-warning);
+  text-underline-offset: 3px;
+}
+::highlight(proof-focus) {
+  background-color: var(--fs-brand-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proof-spinner { animation: none; }
+  .proof-button { transition: none; }
+  .proof-button:active { transform: none; }
+}

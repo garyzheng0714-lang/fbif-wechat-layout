@@ -398,22 +398,33 @@ func (p *publishPipeline) verifyProofread(ctx context.Context, job publishJob) (
 // aiVerifyProofread 复核走 MiMo Pro（ai_models.go）：结论会直接 @ 人，是高价值判断。
 // 返回模型实际看到的正文（服务端校验 wrong 用）与模型原文。
 func aiVerifyProofread(ctx context.Context, job publishJob, candidates []publishRiskItem) (string, string, error) {
-	bodyText, userText := buildRiskUserInput(job, time.Now())
+	bodyText := htmlToPlainText(job.ContentHTML)
+	text, err := aiVerifyProofreadText(ctx, job.Title, bodyText, candidates)
+	return bodyText, text, err
+}
+
+// aiVerifyProofreadText 对一份标题和纯文字正文复核初检挑出的条目，返回模型原文；发布流水线和网页校对共用。
+func aiVerifyProofreadText(ctx context.Context, title, bodyText string, candidates []publishRiskItem) (string, error) {
 	var b strings.Builder
-	b.WriteString(userText)
+	b.WriteString(riskUserInput(title, bodyText, time.Now()))
 	b.WriteString("\n\n初检列出的疑似错误：\n")
 	for i, item := range candidates {
 		fmt.Fprintf(&b, "%d. 原句：%s\n   初检说明：%s\n", i+1,
 			strings.Join(strings.Fields(item.Evidence), " "), strings.Join(strings.Fields(item.Reason), " "))
 	}
-	text, err := aiResponsesCall(ctx, aiModel(aiTierPro), publishProofreadPrompt,
+	return aiResponsesCall(ctx, aiModel(aiTierPro), publishProofreadPrompt,
 		[]map[string]any{{"type": "input_text", "text": b.String()}})
-	return bodyText, text, err
 }
 
 // parsePublishProofread 只收 definite=true、wrong 逐字在正文和原句里、correct 与 wrong 不同且不只差标点、
 // 而且是小改动的条目（proofreadSmallEdit）。
 func parsePublishProofread(text string, candidates []publishRiskItem, sourceText string) ([]publishProofreadFinding, error) {
+	findings, _, err := parsePublishProofreadIndexed(text, candidates, sourceText)
+	return findings, err
+}
+
+// parsePublishProofreadIndexed 同 parsePublishProofread，另外说出每处错误来自第几条候选（从 0 数）。
+func parsePublishProofreadIndexed(text string, candidates []publishRiskItem, sourceText string) ([]publishProofreadFinding, []int, error) {
 	cleaned := stripMarkdownFence(text)
 	if start, end := strings.Index(cleaned, "{"), strings.LastIndex(cleaned, "}"); start >= 0 && end > start {
 		cleaned = cleaned[start : end+1]
@@ -427,11 +438,12 @@ func parsePublishProofread(text string, candidates []publishRiskItem, sourceText
 		} `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &out); err != nil {
-		return nil, fmt.Errorf("校对复核输出不是合法 JSON: %w", err)
+		return nil, nil, fmt.Errorf("校对复核输出不是合法 JSON: %w", err)
 	}
 	haystack := riskEvidenceNormalize(sourceText)
 	seen := map[string]bool{}
 	var findings []publishProofreadFinding
+	var from []int
 	for _, item := range out.Items {
 		if !item.Definite || item.Index < 1 || item.Index > len(candidates) {
 			continue
@@ -452,11 +464,12 @@ func parsePublishProofread(text string, candidates []publishRiskItem, sourceText
 		}
 		seen[wrong+"→"+correct] = true
 		findings = append(findings, publishProofreadFinding{Wrong: wrong, Correct: correct, Evidence: proofreadPlain(evidence, 200)})
+		from = append(from, item.Index-1)
 		if len(findings) >= publishProofreadMaxFindings {
 			break
 		}
 	}
-	return findings, nil
+	return findings, from, nil
 }
 
 // proofreadSmallEdit 改动够小：编辑距离不超过 2，或不超过原片段长度的三分之一。

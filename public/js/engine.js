@@ -34,6 +34,7 @@ import { readImportLinks, writeImportLinks } from './clipboard-links.js';
 import { createCopySession } from './copy-session.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
 import { normalizeWechatRichHtml } from './wechat-normalize.js';
+import { fixHtmlLines, fixPlainText } from './text-fixes.js';
 import {
   loadCards as loadMoreArticlesCards,
   saveCards as saveMoreArticlesCards,
@@ -561,6 +562,31 @@ function renderArticleInputWith(template, input) {
   throw new Error('未知文章输入类型');
 }
 
+// 校对里点了「改正」的几处（input.textFixes）套到排好的结果上：正文各行、标题（正文里没找到的才看标题）、
+// 模板自己给的剪贴板内容（贴图）。sourceLines、sourceTitle 留着没改的原样，校对按它认是不是同一篇；
+// appliedTextFixes 是真改上了的那几处。只在网页上走，接口排版（layoutArticleForCopy）没有这一步。
+function withTextFixes(result, input) {
+  const fixes = input && input.textFixes;
+  if (!Array.isArray(fixes) || !fixes.length) return result;
+  const sourceTitle = result.title || input.title || '';
+  const body = fixHtmlLines(result.lines, fixes);
+  const rest = fixes.filter((_, i) => !body.applied[i]);
+  const title = fixPlainText(sourceTitle, rest);
+  return {
+    ...result,
+    lines: body.lines,
+    title: title.text,
+    clipboard: result.clipboard && {
+      ...result.clipboard,
+      html: fixHtmlLines([result.clipboard.html], fixes).lines[0],
+      text: fixPlainText(result.clipboard.text, fixes).text,
+    },
+    sourceLines: result.lines,
+    sourceTitle,
+    appliedTextFixes: fixes.filter((fix, i) => body.applied[i] || title.applied[rest.indexOf(fix)]),
+  };
+}
+
 function copyBodyHasMeaningfulContent(html) {
   const source = String(html || '').trim();
   if (!source) return false;
@@ -889,7 +915,7 @@ export function initApp(initialTemplate) {
   }
 
   async function renderArticleInput(input) {
-    return renderArticleInputWith(template, input);
+    return withTextFixes(await renderArticleInputWith(template, input), input);
   }
 
   function formatRenderStats(result, elapsed) {
@@ -1453,6 +1479,15 @@ export function initApp(initialTemplate) {
     return true;
   }
   const setArticleRepost = setArticleStrategy;
+  // 校对里改正、撤销：这篇要改的几处整份换掉，走版本门重排（红线 #25）。新导入的文章没有这份，自然清空。
+  async function setTextFixes(fixes) {
+    if (!_articleSession) return false;
+    const textFixes = (Array.isArray(fixes) ? fixes : [])
+      .map(fix => ({ wrong: String(fix.wrong || ''), correct: String(fix.correct || ''), evidence: String(fix.evidence || '') }));
+    _articleSession.input = { ...(_articleSession.input || {}), textFixes };
+    _lastRenderInput = _articleSession.input;
+    return (await _engineRerender()) === true;
+  }
   window._engineApi = {
     ...window._engineApi,
     setActiveConfig,
@@ -1465,6 +1500,8 @@ export function initApp(initialTemplate) {
     setArticleFooterProfileOverride,
     setArticleStrategy,
     setArticleRepost,
+    setTextFixes,
+    getArticleSession: () => _articleSession,
     invalidatePendingWork: invalidatePendingArticleWork,
   };
 

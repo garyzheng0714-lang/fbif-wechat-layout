@@ -111,6 +111,8 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 │   │   ├── clipboard.js            # 剪贴板复制
 │   │   ├── css-inline.js           # 复制前 CSS 内联
 │   │   ├── crop-editor.js          # 图片裁剪编辑
+│   │   ├── article-check.js        # 左栏「AI 校对」卡：排好自动查、预览里标出错处、改正 / 撤销（红线 49）
+│   │   ├── text-fixes.js           # 校对用的文字工具：HTML → 纯文字、找到一处错、改掉它
 │   │   ├── more-articles*.js       # “更多文章”配置与合成
 │   │   ├── asset-library.js        # 总素材库 {{asset#id}} 引用解析
 │   │   ├── blocks/                 # 底部区块统一模型（block-render/-merge/-panel；block-registry.gen.js 由 npm run gen:blocks 生成）
@@ -126,6 +128,7 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 │   ├── main.go                     # API + 静态文件服务 + 渠道路由
 │   ├── article_html.go             # 取正文 HTML 与 meta
 │   ├── article_blocks.go           # 正文块格式（说明书 docs/article-blocks.md 由它生成）
+│   ├── article_check.go            # 网页校对接口 POST /api/article-check（风险检查 + 校对复核，只查不建单）
 │   ├── account_catalog.go          # 账号目录（accountCatalog()，registry.js 的 -emit-registry 源）
 │   ├── rule_defaults.go            # 各账号 / preset 服务端默认成对登记（红线#2/#22）
 │   ├── rule_presets.go             # 规则预设存储与后台 API
@@ -205,6 +208,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/fetch-article` | 抓取文章正文并返回结构化内容或 Markdown |
 | `POST` | `/api/fetch-article-meta` | 获取文章标题、封面、规范链接和正文媒体图列表，用于“更多文章”卡片与选图弹窗 |
 | `GET` | `/api/image-proxy` | 代理图片，绕过浏览器跨域限制 |
+| `POST` | `/api/article-check` | 网页排版时的 AI 校对：交排好的标题和正文纯文字，回确定错误的改法、要核对的、待核的；与发布流水线同一套提示词和模型，同一份内容只查一次；一次最多等 25 秒，没完带 `have` 再交同一份接着等。要登录会话且同源（红线 49） |
 | `POST` | `/api/oss-upload` | 图片上传入口；未配置上游时返回原 base64。要登录会话（cookie 须同源）或服务钥匙（`EXPENSIVE_API_TOKEN`、`RENDER_TOKEN`），只带 Origin/Referer 一律 401 |
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口，门禁同上 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx`；要登录会话或 `EXPENSIVE_API_TOKEN`，付费的 CloudConvert 兜底只认 `EXPENSIVE_API_TOKEN` |

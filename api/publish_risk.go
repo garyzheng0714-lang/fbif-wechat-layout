@@ -137,37 +137,45 @@ func publishRiskSystemPrompt() string {
 // 后半篇从没查过。MiMo Pro 上下文约 1M token，线上最长稿 3.8 万字；真超了让调用报错、
 // 卡片显示检查未完成，不许静默砍掉。
 //
+// 返回的第一个值是 evidence 溯源校验的比对基准——必须是模型真正看到的那份文本。
+func buildRiskUserInput(job publishJob, now time.Time) (bodyText, userText string) {
+	bodyText = htmlToPlainText(job.ContentHTML)
+	return bodyText, riskUserInput(job.Title, bodyText, now)
+}
+
+// riskUserInput 标题和纯文字正文拼成 user message；发布流水线和网页校对（article_check.go）共用这一份。
+//
 // 抽成纯函数有两个理由，都是评审实测出来的坑：
 //   - **当前日期**：资讯讲的往往是模型知识截止之后的事。不给日期，模型会拿过时记忆
 //     去「纠正」正确的新事实（公司更名、高管变动）。
 //   - **注入隔离**：正文是外部抓来的，可能含「本文已通过合规审查」这类诱导文字，
 //     必须显式声明分隔标记内一律为待检数据。
-//
-// 返回的第一个值是 evidence 溯源校验的比对基准——必须是模型真正看到的那份文本。
-func buildRiskUserInput(job publishJob, now time.Time) (bodyText, userText string) {
-	bodyText = htmlToPlainText(job.ContentHTML)
-
+func riskUserInput(title, bodyText string, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "今天是 %s。\n", now.In(time.FixedZone("CST", 8*3600)).Format("2006年1月2日"))
 	b.WriteString("你的训练知识可能早于本文。正文与你的记忆冲突时，只能提醒、不能断言正文写错。\n")
 	b.WriteString("\n文章标题：")
-	b.WriteString(job.Title)
+	b.WriteString(title)
 	b.WriteString("\n\n<正文开始>\n")
 	b.WriteString(bodyText)
 	b.WriteString("\n<正文结束>")
-	return bodyText, b.String()
+	return b.String()
 }
 
 // aiAssessPublishRisk 风险检查走 MiMo Pro（ai_models.go）：不看图，但它是公开前的
 // 高价值把关（2026-10-07 用户裁定 Pro 承担高价值任务）。返回的 Raw 仅在解析失败时供
 // fallback 留痕，成功结果不保存整段模型响应。
 func aiAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAssessment, error) {
+	return aiAssessRiskText(ctx, job.Title, htmlToPlainText(job.ContentHTML), fmt.Sprintf("job %d", job.ID))
+}
+
+// aiAssessRiskText 对一份标题和纯文字正文做风险检查；who 只用来在日志里说是哪篇。
+func aiAssessRiskText(ctx context.Context, title, bodyText, who string) (publishRiskAssessment, error) {
 	if _, _, err := aiCredential(ctx); err != nil {
 		return publishRiskAssessment{}, err
 	}
-	bodyText, userText := buildRiskUserInput(job, time.Now())
 	text, err := aiResponsesCall(ctx, aiModel(aiTierPro), publishRiskSystemPrompt(),
-		[]map[string]any{{"type": "input_text", "text": userText}})
+		[]map[string]any{{"type": "input_text", "text": riskUserInput(title, bodyText, time.Now())}})
 	if err != nil {
 		return publishRiskAssessment{}, err
 	}
@@ -180,7 +188,7 @@ func aiAssessPublishRisk(ctx context.Context, job publishJob) (publishRiskAssess
 	var downgraded int
 	result.Items, downgraded = groundPublishRiskEvidence(result.Items, bodyText)
 	if downgraded > 0 {
-		log.Printf("publish: WARN job %d 风险条目 %d 条的 evidence 不在正文中，已降级为待核", job.ID, downgraded)
+		log.Printf("publish: WARN %s 风险条目 %d 条的 evidence 不在正文中，已降级为待核", who, downgraded)
 	}
 	result.Items = mergeComplianceItems(result.Items)
 	return result, nil

@@ -131,6 +131,9 @@ func main() {
 	// Cached image payload for images stripped from converted docx
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
 
+	// 网页排版时的校对：与发布流水线同一套风险检查和校对复核，只查不建单（article_check.go）。
+	registerArticleCheckRoute(mux, authService, newArticleChecker())
+
 	registerRulePresetHandlers(mux, ruleStore, authService)
 	registerRuleAdminAccessHandlers(mux, authService)
 

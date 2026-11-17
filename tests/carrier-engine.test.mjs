@@ -179,3 +179,60 @@ test('文章草稿在贴图载体下恢复：按贴图从原文重排，不留�
   assert.equal(after.contentArea().innerHTML.replace(/<!--[\s\S]*?-->/g, ''), STICKER_HTML);
   assert.deepEqual(await copy(after), { html: STICKER_HTML, text: SAMPLE });
 });
+
+// 校对里点「改正」（红线 49）：同一台真引擎上跑，改的只是这一处，预览、复制、贴图那份都跟着改。
+const TYPO_FIX = { wrong: '马冬莓', correct: '马冬梅', evidence: '“马冬莓。”' };
+
+test('校对改正：只改原句里那一处，预览和复制都是改过的；撤销后与原来逐字一样', async () => {
+  const page = openPage();
+  engine.initApp(fbif);
+  await pasteArticle(page);
+  const original = page.contentArea().innerHTML;
+  const originalCopy = await copy(page);
+
+  assert.equal(await page.window._engineApi.setTextFixes([TYPO_FIX]), true);
+  await settle(20);
+  const fixedText = page.contentArea().textContent;
+  assert.match(fixedText, /“马冬梅。”/);
+  assert.match(fixedText, /「马冬莓」等你/, '别处同样的字不动');
+  const session = page.window._engineApi.getArticleSession();
+  assert.deepEqual(session.result.appliedTextFixes, [TYPO_FIX]);
+  assert.match(session.result.sourceLines.join('\n'), /“马冬莓。”/, '没改过的原文留着，校对按它认是不是同一篇');
+  const fixedCopy = await copy(page);
+  assert.match(fixedCopy.html, /“马冬梅。”/);
+  assert.doesNotMatch(fixedCopy.html, /“马冬莓。”/);
+
+  await page.window._engineSwitchTemplate(sticker);
+  await settle(20);
+  assert.deepEqual(await copy(page), {
+    html: STICKER_HTML.replace('“马冬莓。”', '“马冬梅。”'),
+    text: SAMPLE.replace('“马冬莓。”', '“马冬梅。”'),
+  }, '切到贴图改正还在，贴图自己的剪贴板内容也改了');
+  await page.window._engineSwitchTemplate(fbif);
+  await settle(20);
+
+  assert.equal(await page.window._engineApi.setTextFixes([]), true);
+  await settle(20);
+  assert.equal(page.contentArea().innerHTML, original);
+  assert.deepEqual(await copy(page), originalCopy);
+});
+
+test('校对改正跟着草稿走，新导入一篇自然清空', async () => {
+  const before = openPage();
+  engine.initApp(fbif);
+  await pasteArticle(before);
+  await before.window._engineApi.setTextFixes([TYPO_FIX]);
+  await settle(20);
+  const snapshot = JSON.parse(JSON.stringify(before.window._captureSessionSnapshot()));
+
+  const after = openPage();
+  engine.initApp(fbif);
+  assert.equal(after.window._restoreSessionSnapshot(snapshot), true);
+  assert.match(after.contentArea().textContent, /“马冬梅。”/);
+  assert.deepEqual(after.window._engineApi.getArticleSession().result.appliedTextFixes, [TYPO_FIX]);
+  assert.match((await copy(after)).html, /“马冬梅。”/);
+
+  await pasteArticle(after);
+  assert.match(after.contentArea().textContent, /“马冬莓。”/);
+  assert.equal(after.window._engineApi.getArticleSession().result.appliedTextFixes, undefined);
+});
