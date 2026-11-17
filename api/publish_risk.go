@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -216,12 +217,8 @@ func assessPublishRiskWithFallback(ctx context.Context, job publishJob, assess f
 }
 
 func parsePublishRiskAssessment(text string) (publishRiskAssessment, error) {
-	cleaned := stripMarkdownFence(text)
-	if start, end := strings.Index(cleaned, "{"), strings.LastIndex(cleaned, "}"); start >= 0 && end > start {
-		cleaned = cleaned[start : end+1]
-	}
-	var result publishRiskAssessment
-	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
+	result, err := decodePublishRiskOutput(text)
+	if err != nil {
 		return publishRiskAssessment{}, fmt.Errorf("风险审核输出不是合法 JSON: %w", err)
 	}
 	result.Level = strings.ToLower(strings.TrimSpace(result.Level))
@@ -280,6 +277,40 @@ func parsePublishRiskAssessment(text string) (publishRiskAssessment, error) {
 	result.Notes = truncateRunes(strings.TrimSpace(result.Notes), 600)
 	result.Raw = ""
 	return result, nil
+}
+
+// riskUnfinishedNotes 输出停在最后一个字段 notes 上：level、headline、items 都写完了，只差结尾。
+// 第 1 组是 notes 的收尾引号（写了就只差 `}`，没写差 `"}`）。
+var riskUnfinishedNotes = regexp.MustCompile(`(?s)^\{.*"items"\s*:\s*\[.*\]\s*,\s*"notes"\s*:\s*"(?:[^"\\]|\\.)*("?)\s*$`)
+
+// decodePublishRiskOutput 从模型的回答里取出结论那个 JSON 对象：前面的话、围栏、对象后面多出来的东西都不管。
+//
+// 模型常把最后一个字段 notes 写完一句就停、漏了结尾（2026-11-17 回放线上 12 篇「风险审核输出不是合法 JSON」的原始
+// 返回：5 篇漏 `"}`、6 篇只漏 `}`、1 篇对象后面又跟了一个 {"status":"done"}；11 月 50 篇里 7 篇因此落成
+// 「风险检查未完成」）。结论和条目都在 notes 之前、是完整的，补上结尾照常用。只补这一种：停在 headline、items 里
+// 说明结论本身没写完，照旧算没查成。
+func decodePublishRiskOutput(text string) (publishRiskAssessment, error) {
+	body := stripMarkdownFence(text)
+	if start := strings.Index(body, "{"); start >= 0 {
+		body = strings.TrimSpace(body[start:])
+	}
+	var result publishRiskAssessment
+	err := json.NewDecoder(strings.NewReader(body)).Decode(&result)
+	if err == nil {
+		return result, nil
+	}
+	if tail := riskUnfinishedNotes.FindStringSubmatch(body); tail != nil {
+		closing := `"}`
+		if tail[1] != "" {
+			closing = "}"
+		}
+		var closed publishRiskAssessment
+		if json.Unmarshal([]byte(body+closing), &closed) == nil {
+			log.Printf("publish: 风险审核输出停在 notes 上没写完结尾，已补上")
+			return closed, nil
+		}
+	}
+	return publishRiskAssessment{}, err
 }
 
 // publishRiskHeadlineOrFallback 卡片首屏那句话的唯一取值口径。模型没给 headline、

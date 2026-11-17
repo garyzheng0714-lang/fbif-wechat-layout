@@ -211,6 +211,10 @@
   text-decoration: underline wavy var(--fs-warning);
   text-underline-offset: 3px;
 }
+::highlight(proof-note) {
+  text-decoration: underline dotted var(--fs-text-3);
+  text-underline-offset: 3px;
+}
 ::highlight(proof-focus) {
   background-color: var(--fs-brand-soft);
 }

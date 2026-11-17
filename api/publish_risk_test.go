@@ -29,6 +29,52 @@ func TestParsePublishRiskAssessmentNormalizesHighestLevel(t *testing.T) {
 	}
 }
 
+// 模型把 notes 写完一句就停、漏了结尾的引号和括号（2026-11 流水线 50 篇里 7 篇）：结论和条目是完整的，补上照常用。
+func TestParsePublishRiskAssessmentClosesUnfinishedNotes(t *testing.T) {
+	clean := `{"level":"pass","headline":"未发现可证实的实质性错误","items":[],"notes":"全文数字口径前后一致，建议补上具体财年区间。`
+	got, err := parsePublishRiskAssessment(clean)
+	if err != nil {
+		t.Fatalf("notes 没写完结尾应补上：%v", err)
+	}
+	if got.Level != publishRiskPass || len(got.Items) != 0 || got.Notes != "全文数字口径前后一致，建议补上具体财年区间。" {
+		t.Fatalf("got = %+v", got)
+	}
+
+	withItems := "```json\n" + `{"level":"warning","headline":"另有 1 处成稿问题。","items":[{"category":"integrity","level":"warning","certainty":"confirmed","evidence":"仿佛重回重回高中生物课堂","reason":"「重回」叠字。"}],"notes":"他说\"口径一致\"，文中未发现标题与正文打架`
+	got, err = parsePublishRiskAssessment(withItems)
+	if err != nil {
+		t.Fatalf("带条目、带围栏、notes 里有转义引号也应补上：%v", err)
+	}
+	if got.Level != publishRiskWarning || len(got.Items) != 1 || got.Items[0].Evidence != "仿佛重回重回高中生物课堂" {
+		t.Fatalf("got = %+v", got)
+	}
+
+	// notes 的引号写了、只漏了最后的括号；对象后面又跟了别的东西：都照常用（线上回放里各有 6 篇、1 篇）。
+	for name, raw := range map[string]string{
+		"只漏括号":     `{"level":"pass","headline":"未发现可证实的实质性错误","items":[],"notes":"署名与转载说明完整。"`,
+		"后面多了一个对象": `{"level":"pass","headline":"未发现可证实的实质性错误","items":[],"notes":"可斟酌。"} {"status":"done"}`,
+		"后面跟了一句话":  `{"level":"pass","headline":"未发现可证实的实质性错误","items":[],"notes":""}` + "\n以上是检查结果。",
+	} {
+		got, err := parsePublishRiskAssessment(raw)
+		if err != nil || got.Level != publishRiskPass {
+			t.Fatalf("%s：got = %+v err = %v", name, got, err)
+		}
+	}
+
+	// 结论本身没写完的不补：停在 headline、停在 items 里、notes 停在转义一半，都照旧算没查成。
+	for name, raw := range map[string]string{
+		"停在 headline":  `{"level":"pass","headline":"未发现可证实的`,
+		"停在 items 里":   `{"level":"warning","headline":"有问题","items":[{"category":"number","level":"warning","evidence":"前面写 77%`,
+		"items 没闭合":    `{"level":"warning","headline":"有问题","items":[{"category":"number","level":"warning","certainty":"confirmed","evidence":"甲","reason":"乙"},"notes":"丙`,
+		"notes 停在转义一半": `{"level":"pass","headline":"未发现","items":[],"notes":"文中写到\`,
+		"压根没有 JSON":    `模型说了一段话，没有按格式回`,
+	} {
+		if _, err := parsePublishRiskAssessment(raw); err == nil {
+			t.Fatalf("%s：不该当成查完", name)
+		}
+	}
+}
+
 func TestParsePublishRiskAssessmentRejectsUnknownShape(t *testing.T) {
 	for _, raw := range []string{
 		`{"level":"safe","items":[]}`,

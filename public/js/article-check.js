@@ -6,7 +6,7 @@
 //
 // 这篇是不是查过，只看没改过的标题和正文（引擎留在 session.result.sourceLines）：点了改正、换了规则重排都不重查；
 // 改了哪几处记在引擎的 input.textFixes，新导入一篇自然清空。预览里的线用 CSS Custom Highlight 画，不动预览的
-// DOM，所以不会进复制的内容。
+// DOM，所以不会进复制的内容：红波浪线是还没改的确定错误，橙波浪线是要核对的，灰虚线是待核的（展开那一栏才画）。
 
 import { articleText, fixHtmlLines, fixPlainText, locate, sameFix } from './text-fixes.js';
 
@@ -223,6 +223,8 @@ export function mountArticleCheck({
     };
     set('proof-error', view ? ranges.fixes.filter((_, i) => !isApplied(view.fixes[i])) : []);
     set('proof-issue', ranges.issues);
+    // 待核的平时不画，展开那一栏才画（灰色虚线）。
+    set('proof-note', mount.querySelector('.proof-notes[open]') ? ranges.notes : []);
   }
 
   function showInPreview(range) {
@@ -260,7 +262,7 @@ export function mountArticleCheck({
     const open = fixes.filter((_, i) => !done[i] && (inBody[i] || inTitle[i]));
 
     let state = '';
-    if (working) state = '<span class="proof-state"><span class="proof-spinner" aria-hidden="true"></span>' + (status === 'verifying' ? '正在复核改法' : '正在通读全文') + '</span>';
+    if (working) state = '<span class="proof-state"><span class="proof-spinner" aria-hidden="true"></span>' + (status === 'verifying' ? '正在复核改法' : '正在通读全文，约 3 分钟') + '</span>';
     else if (status === 'failed') state = '<span class="proof-state is-failed">' + esc(view.error || ERROR_TEXT) + '</span><button class="proof-button" type="button" data-retry>重试</button>';
     else if (!fixes.length && !issues.length) state = '<span class="proof-state is-clean">' + CHECK_ICON + '没发现错误</span>';
     else if (open.length > 1) state = '<button class="proof-button" type="button" data-fix-all' + (busy ? ' disabled' : '') + '>全部改正</button>';
@@ -292,6 +294,8 @@ export function mountArticleCheck({
   mount.setAttribute('role', 'region');
   mount.setAttribute('aria-label', 'AI 校对');
   mount.setAttribute('aria-live', 'polite');
+  // toggle 不冒泡，在捕获阶段接：展开、收起待核时重画预览里的线。
+  mount.addEventListener('toggle', () => paintPreview(job && job.view), true);
   mount.addEventListener('click', event => {
     const target = event.target.closest('button');
     if (!target || !job || !job.view) return;

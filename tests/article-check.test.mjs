@@ -110,7 +110,7 @@ test('查完列出改法、要核对的、待核的；原句里标出出错的�
   assert.equal(p.mount.hidden, true, '没有文章不出卡');
   p.show(session());
   assert.equal(p.mount.hidden, false);
-  assert.match(p.text(), /AI 校对正在通读全文/);
+  assert.match(p.text(), /AI 校对正在通读全文，约 3 分钟/);
   await until(() => p.state.posts.length === 2 && !/正在/.test(p.text()), '查完');
   assert.deepEqual(p.state.posts.map(post => [post.url, post.title, post.text, post.have, post.retry]), [
     ['/api/article-check', '标题', '仿佛重回重回高中生物课堂。\n市占率约为45%，增强免疫力，经认证。', '', false],
