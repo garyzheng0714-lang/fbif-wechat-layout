@@ -6,27 +6,18 @@
 
 ## 接上（每人一次）
 
-地址：`https://fbifmp-layout.foodtalks.cn/mcp`
+打开排版工具，点左下角头像 →「接入智能体」→「复制提示词」，发给自己的智能体（Codex、Claude Code、Cursor、VS Code、Gemini CLI、Windsurf、Claude 桌面版……），它会带你加服务器、飞书登录、确认接好。提示词全文也在 [README「在智能体里用」](../README.md#在智能体里用mcp)。
 
-**Codex**
-
-```sh
-codex mcp add fbif-layout --url https://fbifmp-layout.foodtalks.cn/mcp
-```
-
-加完会直接打开浏览器登录。以后要重新登录：`codex mcp login fbif-layout`。
-
-**Claude Code**
+自己动手：地址 `https://fbifmp-layout.foodtalks.cn/mcp`，名称 `fbif-layout`，Streamable HTTP，不填钥匙。
 
 ```sh
-claude mcp add --transport http fbif-layout https://fbifmp-layout.foodtalks.cn/mcp
+codex mcp add fbif-layout --url https://fbifmp-layout.foodtalks.cn/mcp            # 加完直接打开浏览器登录
+claude mcp add --transport http --scope user fbif-layout https://fbifmp-layout.foodtalks.cn/mcp   # 再在 Claude Code 里 /mcp 登录
 ```
 
-然后在 Claude Code 里输入 `/mcp`，选 fbif-layout 登录。
+登录时浏览器会打开 FBIF 登录页，用飞书登录，再在确认页点「允许」。之后智能体自己续期；30 天没用或满 90 天要再点一次。只有用飞书登录的 FBIF 同事能用（头像菜单里也只给他们「接入智能体」）；账号停用、离职，智能体下一次调用就进不来。
 
-别的支持 MCP 的智能体（Cursor 等）：添加远程 MCP 服务器，填上面的地址。
-
-登录时浏览器会打开 FBIF 登录页，用飞书登录，再在确认页点「允许」。之后智能体自己续期；30 天没用或满 90 天要再点一次。只有用飞书登录的 FBIF 同事能用；账号停用、离职，智能体下一次调用就进不来。
+接不了的：网页里的 ChatGPT、claude.ai，Claude 桌面版的「自定义连接器」——它们从云端连过来，登录回不到本机（见下「动态注册」）。Claude 桌面版改走 `mcp-remote`，提示词里写了。
 
 ## 怎么用
 
@@ -59,6 +50,8 @@ Markdown 的写法：开头一行 `# 标题` 是文章标题，`##` 起是小标
   - 元数据：`/.well-known/oauth-protected-resource`、`/.well-known/oauth-authorization-server`。
   - 授权与令牌：`/oauth/authorize`、`/oauth/token`、`/oauth/register`、`/oauth/revoke`。
   - 授权记录存 `agent-grants.json`（和用户库同一个目录），令牌只存哈希。
+  - 动态注册只登记回到本机的回调（`http://127.0.0.1`、`http://localhost`、应用自己的协议），别的去掉、照样发 client_id，一个本机的都没有才拒：VS Code、Cursor 注册时连自己网页版的 https 回调一起报，桌面版登录走本机回调。只收本机回调是为了别人做不出「登录后授权码送到他网站」的链接。
+- 接入窗口：`public/js/agent-connect.js`，提示词只在这里写一份；地址取 `/.well-known/oauth-protected-resource/mcp` 的 `resource`。改了提示词跑 `README_UPDATE=1 node --test tests/agent-connect.test.mjs` 重写 README 那段。
 - MCP：`api/agent_mcp.go`，用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）。
   - 排版和排版接口同一条路（`layoutAPI.launch`，红线 46），成品与网页逐字一样。
   - 校对和网页「AI 校对」同一个 `articleChecker`（红线 49）。
@@ -76,4 +69,5 @@ Markdown 的写法：开头一行 `# 标题` 是文章标题，`##` 起是小标
 - `api/internal/mcpauth/mcpauth_test.go`：授权流程。
 - `api/agent_mcp_test.go`：工具、交接、只给本人、停用即停、不碰平台。
 - `tests/agent-handoff.test.mjs`：编辑器交接。
+- `tests/agent-connect.test.mjs`：接入窗口、提示词讲到每个工具、README 与窗口一字不差。
 - `tests/layout-parity.test.mjs`：`.md` 认结构。

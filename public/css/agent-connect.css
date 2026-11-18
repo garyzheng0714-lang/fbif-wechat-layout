@@ -1,0 +1,105 @@
+/* 接入智能体窗口（public/js/agent-connect.js，红线 51）：原生 <dialog>，头、身、脚沿用 .modal-* 的样子。 */
+
+dialog.agent-connect {
+  width: 600px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100dvh - 48px);
+  /* 全局重置把 margin 清成 0，原生 <dialog> 靠 margin:auto 居中，这里补回来。 */
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--fs-r-l);
+  background: var(--fs-bg-card);
+  box-shadow: var(--fs-sh-s3);
+  color: var(--fs-text-1);
+  font-family: var(--fs-font);
+  overflow: hidden;
+}
+
+dialog.agent-connect[open] {
+  display: flex;
+  flex-direction: column;
+  animation: agent-connect-in 200ms var(--fs-ease-out);
+}
+
+dialog.agent-connect::backdrop {
+  background: var(--fs-bg-overlay);
+}
+
+@keyframes agent-connect-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+dialog.agent-connect .modal-title {
+  margin: 0;
+}
+
+dialog.agent-connect .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.agent-connect-prompt {
+  height: 320px;
+  max-height: calc(100dvh - 260px);
+  min-height: 120px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-y: auto;
+  border-radius: var(--fs-r-s);
+  background: var(--fs-bg-nested);
+  color: var(--fs-text-1);
+  font: 400 13px/1.6 var(--fs-font);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-connect-prompt:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--fs-brand-soft), 0 0 0 3px var(--fs-brand);
+}
+
+.agent-connect-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-connect-url-label {
+  flex: 0 0 auto;
+  color: var(--fs-text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.agent-connect-url-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fs-text-1);
+  font: 400 12px/1.55 var(--fs-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: all;
+}
+
+.agent-connect-url .btn-sm {
+  flex: 0 0 auto;
+}
+
+.agent-connect-error {
+  margin: 0;
+  color: var(--fs-danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.agent-connect[open] {
+    animation: none;
+  }
+}

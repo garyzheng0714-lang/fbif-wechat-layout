@@ -2,6 +2,8 @@
 // 没登录时去 /auth/login?next=（飞书客户端里直接走飞书登录），后端再送去登录中心；登录完回到 next。
 // 飞书登录了还没授权云文档的，接着自动去授权（autoGrantFeishu）。
 
+import { openAgentConnect } from './agent-connect.js';
+
 export async function authFetch(input, init = {}, {
   fetchImpl = globalThis.fetch,
 } = {}) {
@@ -239,6 +241,35 @@ function makeRuleAdminIcon(documentRef) {
   return icon;
 }
 
+// Lucide「bot」。
+function makeAgentIcon(documentRef) {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = documentRef.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('width', '18');
+  icon.setAttribute('height', '18');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('aria-hidden', 'true');
+  const shapes = [
+    ['path', { d: 'M12 8V4H8' }],
+    ['rect', { width: '16', height: '12', x: '4', y: '8', rx: '2' }],
+    ['path', { d: 'M2 14h2' }],
+    ['path', { d: 'M20 14h2' }],
+    ['path', { d: 'M15 13v2' }],
+    ['path', { d: 'M9 13v2' }],
+  ];
+  shapes.forEach(([tag, attrs]) => {
+    const shape = documentRef.createElementNS(namespace, tag);
+    Object.entries(attrs).forEach(([key, value]) => shape.setAttribute(key, value));
+    shape.setAttribute('stroke', 'currentColor');
+    shape.setAttribute('stroke-width', '1.7');
+    shape.setAttribute('stroke-linecap', 'round');
+    shape.setAttribute('stroke-linejoin', 'round');
+    icon.append(shape);
+  });
+  return icon;
+}
+
 function makeActionChevronIcon(documentRef) {
   const namespace = 'http://www.w3.org/2000/svg';
   const icon = documentRef.createElementNS(namespace, 'svg');
@@ -366,6 +397,25 @@ export function mountUserIdentity(container, user, {
   divider.className = 'user-identity-divider';
   menu.append(divider);
 
+  // 接入智能体（红线 51）：只给能接的人（飞书登录的同事）；点了打开窗口拿提示词。
+  if (user.capabilities?.agent) {
+    const agentButton = documentRef.createElement('button');
+    agentButton.type = 'button';
+    agentButton.className = 'user-identity-action';
+    agentButton.setAttribute('role', 'menuitem');
+    agentButton.setAttribute('data-agent-connect', '');
+    agentButton.append(makeAgentIcon(documentRef));
+    const agentCopy = documentRef.createElement('span');
+    agentCopy.className = 'user-identity-action-copy';
+    appendTextLine(documentRef, agentCopy, 'user-identity-action-label', '接入智能体');
+    agentButton.append(agentCopy, makeActionChevronIcon(documentRef));
+    agentButton.addEventListener('click', () => {
+      setOpen(false);
+      openAgentConnect({ documentRef, fetchImpl });
+    });
+    menu.append(agentButton);
+  }
+
   if (adminRole) {
     const adminButton = documentRef.createElement('button');
     adminButton.type = 'button';
@@ -380,10 +430,13 @@ export function mountUserIdentity(container, user, {
     appendTextLine(documentRef, adminCopy, 'user-identity-action-meta', '管理排版规则与权限');
     adminButton.append(adminCopy, makeActionChevronIcon(documentRef));
     menu.append(adminButton);
+    adminButton.addEventListener('click', () => setOpen(false));
+  }
+
+  if (menu.querySelector('.user-identity-action')) {
     const actionDivider = documentRef.createElement('div');
     actionDivider.className = 'user-identity-divider';
     menu.append(actionDivider);
-    adminButton.addEventListener('click', () => setOpen(false));
   }
 
   const logoutButton = documentRef.createElement('button');

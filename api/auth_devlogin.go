@@ -95,5 +95,8 @@ func (d *devLogin) shutdown(context.Context) error { return nil }
 // agentCheck：本地测试登录的都是账号用户，没有飞书、没有停用名单，都放。
 func (d *devLogin) agentCheck(context.Context, authUser) error { return nil }
 
+// agentCapable：本地测试登录的都能接，身份菜单照常给「接入智能体」。
+func (d *devLogin) agentCapable(authUser) bool { return true }
+
 // page：本地测试照常发页面，没登录由页面自己的登录检查处理（本地 /auth/login 只是一行说明）。
 func (d *devLogin) page(next http.Handler) http.Handler { return next }

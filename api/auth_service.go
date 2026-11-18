@@ -33,6 +33,8 @@ type authCapabilities struct {
 	FeishuDocuments bool `json:"feishu_documents"`
 	RuleAdmin       bool `json:"rule_admin"`
 	RuleSuperAdmin  bool `json:"rule_super_admin"`
+	// Agent 能接智能体（红线 51）：编辑器身份菜单据此给「接入智能体」；停用名单、账号状态在每次调用时另查。
+	Agent bool `json:"agent"`
 }
 
 type authPublicUser struct {
@@ -175,6 +177,14 @@ func (s *authService) effectiveRole(user authUser) authRole {
 	return role
 }
 
+// agentCapable 身份菜单给不给「接入智能体」：按登录方式定（没有登录后端的测试按飞书同事算）。
+func (s *authService) agentCapable(user authUser) bool {
+	if s.login != nil {
+		return s.login.agentCapable(user)
+	}
+	return feishuColleague(user)
+}
+
 func (s *authService) publicAuthUser(user authUser) authPublicUser {
 	role := s.effectiveRole(user)
 	return authPublicUser{
@@ -188,6 +198,7 @@ func (s *authService) publicAuthUser(user authUser) authPublicUser {
 			FeishuDocuments: feishuAppFor(user.ID) != "",
 			RuleAdmin:       role == authRoleAdmin || role == authRoleSuperAdmin,
 			RuleSuperAdmin:  role == authRoleSuperAdmin,
+			Agent:           s.agentCapable(user),
 		},
 	}
 }

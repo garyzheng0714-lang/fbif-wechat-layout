@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -429,6 +430,55 @@ func TestDynamicRegistrationOnlyForThisComputer(t *testing.T) {
 	access, _ := h.login(id, "cursor://anysphere.cursor-mcp/oauth/callback")
 	if rec := h.callMCP(access); rec.Code != http.StatusOK {
 		t.Fatalf("动态注册的应用登录后调 MCP：%d", rec.Code)
+	}
+}
+
+// VS Code、Cursor 注册时连同自己网页版的 https 回调一起报（2026-11 两家源码里的原样），桌面版登录走本机回调：
+// 只登记本机的、照样给 client_id，https 那个登不进来；一个本机的都没有才拒，说明里带 redirect（Cursor 见了会只拿本机回调重注册）。
+func TestDynamicRegistrationKeepsOnlyLocalCallbacks(t *testing.T) {
+	h := newHarness(t)
+	register := func(body string) (int, map[string]any) {
+		req := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := h.do(req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	for _, c := range []struct {
+		name, body, login string
+		kept              []any
+	}{
+		{"VS Code",
+			`{"client_name":"Visual Studio Code","redirect_uris":["https://insiders.vscode.dev/redirect","https://vscode.dev/redirect","http://127.0.0.1/","http://127.0.0.1:33418/"],"token_endpoint_auth_method":"none","application_type":"native"}`,
+			"http://127.0.0.1:33418/", []any{"http://127.0.0.1/", "http://127.0.0.1:33418/"}},
+		{"Cursor",
+			`{"client_name":"Cursor","redirect_uris":["https://www.cursor.com/agents/mcp/oauth/callback","http://localhost:8787/callback"]}`,
+			"http://localhost:18787/callback", []any{"http://localhost:8787/callback"}},
+	} {
+		status, out := register(c.body)
+		if status != http.StatusCreated {
+			t.Fatalf("%s 应能注册：%d %v", c.name, status, out)
+		}
+		if got := out["redirect_uris"].([]any); fmt.Sprint(got) != fmt.Sprint(c.kept) {
+			t.Fatalf("%s 回包只写登记了的本机回调，实际 %v", c.name, got)
+		}
+		id := out["client_id"].(string)
+		h.person = "u1"
+		for _, hosted := range []string{"https://vscode.dev/redirect", "https://www.cursor.com/agents/mcp/oauth/callback"} {
+			rec := h.get("/oauth/authorize?" + authorizeQuery(id, hosted).Encode())
+			if rec.Code != http.StatusBadRequest || rec.Header().Get("Location") != "" || !strings.Contains(rec.Body.String(), "回调地址不对") {
+				t.Fatalf("%s 网页版回调 %s 不该能登录：%d %s", c.name, hosted, rec.Code, rec.Header().Get("Location"))
+			}
+		}
+		access, _ := h.login(id, c.login)
+		if rec := h.callMCP(access); rec.Code != http.StatusOK {
+			t.Fatalf("%s 走本机回调登录后调 MCP：%d", c.name, rec.Code)
+		}
+	}
+	status, out := register(`{"client_name":"claude.ai","redirect_uris":["https://claude.ai/api/mcp/auth_callback"]}`)
+	if status != http.StatusBadRequest || out["error"] != "invalid_redirect_uri" || !strings.Contains(fmt.Sprint(out["error_description"]), "redirect") {
+		t.Fatalf("只有云端回调的应拒，说明里带 redirect：%d %v", status, out)
 	}
 }
 

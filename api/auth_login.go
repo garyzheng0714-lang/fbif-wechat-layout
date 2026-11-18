@@ -40,6 +40,8 @@ type loginBackend interface {
 	page(next http.Handler) http.Handler
 	// agentCheck 这个人现在能不能让智能体替他用排版工具（agent_mcp.go 每次调用、每次换令牌都问）。
 	agentCheck(ctx context.Context, user authUser) error
+	// agentCapable 这类账号能不能接智能体：编辑器身份菜单据此给「接入智能体」（/api/auth/me 的 capabilities.agent）。
+	agentCapable(user authUser) bool
 	shutdown(ctx context.Context) error
 }
 
@@ -313,8 +315,15 @@ func (l *ssoLogin) page(next http.Handler) http.Handler { return l.sso.RequirePa
 
 // agentCheck 智能体拿的是自己的令牌、不走登录会话，登录模板的停用名单要在这里查：只放 FBIF 飞书登录的同事，
 // 离职、停用（登录中心推来的名单）的当场不让用；名单没同步过、读不出来也不放，和登录时一样。
+// feishuColleague 只有飞书登录的 FBIF 同事能接智能体：账号密码登录的外部编辑没有飞书身份，停用名单也认不出他。
+func feishuColleague(user authUser) bool {
+	return feishuAppFor(user.ID) != "" && user.FeishuUnionID != ""
+}
+
+func (l *ssoLogin) agentCapable(user authUser) bool { return feishuColleague(user) }
+
 func (l *ssoLogin) agentCheck(ctx context.Context, user authUser) error {
-	if feishuAppFor(user.ID) == "" || user.FeishuUnionID == "" {
+	if !feishuColleague(user) {
 		return errors.New("只有用飞书登录的 FBIF 同事能让智能体用排版工具")
 	}
 	if _, synced, err := l.store.BlocklistRevision(ctx); err != nil || !synced {

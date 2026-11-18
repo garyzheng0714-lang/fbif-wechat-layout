@@ -181,11 +181,18 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		registerError(w, http.StatusBadRequest, "invalid_redirect_uri", "要写 1 到 10 个回调地址")
 		return
 	}
+	// 只登记回到本机的回调，别的去掉、照样发 client_id（RFC 7591 §3.2.1 许服务器改客户端报的元数据，回包写实际登记的）。
+	// VS Code、Cursor 注册时会连同自己网页版的 https 回调一起报，桌面版登录走本机回调；整单拒了它们就接不上。
+	local := make([]string, 0, len(req.RedirectURIs))
 	for _, uri := range req.RedirectURIs {
-		if len(uri) > 512 || !nativeRedirect(uri) {
-			registerError(w, http.StatusBadRequest, "invalid_redirect_uri", "回调地址只能回到本机（http://127.0.0.1、http://localhost 或应用自己的协议）："+uri)
-			return
+		if len(uri) <= 512 && nativeRedirect(uri) {
+			local = append(local, uri)
 		}
+	}
+	if len(local) == 0 {
+		// 说明里带英文 redirect：Cursor 见到这个词会只拿本机回调再注册一次。
+		registerError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uris 里要有回到本机的地址（http://127.0.0.1、http://localhost 或应用自己的协议）；网页版、云端客户端接不了")
+		return
 	}
 	name := strings.TrimSpace(req.ClientName)
 	if r := []rune(name); len(r) > 40 {
@@ -195,7 +202,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		name = "未命名应用"
 	}
 	now := s.opt.Now()
-	c := Client{ID: "dcr_" + randomToken()[:22], Name: name, RedirectURIs: req.RedirectURIs}
+	c := Client{ID: "dcr_" + randomToken()[:22], Name: name, RedirectURIs: local}
 	if err := s.store.register(c, now); err != nil {
 		s.opt.Logf("mcpauth: 存注册的客户端失败：%v", err)
 		registerError(w, http.StatusInternalServerError, "server_error", "没存下来，再试一次")

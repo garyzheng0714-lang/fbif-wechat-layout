@@ -14,6 +14,72 @@ FBIF 内容排版与发布工具，用于把 DOCX、Markdown、剪贴板正文�
 - **服务对象**：FBIF 公众号编辑、FoodTalks 网站编辑和需要统一文章样式与审核流程的内容运营人员。
 - **服务宿主**：交互式输出面向微信公众号编辑器和 FoodTalks CMS；程序化接口供内部内容流水线调用。本仓库不是浏览器插件，也不是飞书多维表格插件。
 
+## 在智能体里用（MCP）
+
+同事可以在 Codex、Claude Code、Cursor 这类智能体里用排版工具：把稿子交给智能体，说排成哪个账号，它排好给一个链接，打开就在排版工具里接着改、点「复制全文」粘进后台；也能让它做 AI 校对。只排版和校对，不存草稿、不发布、不碰任何平台。只有用飞书登录的 FBIF 同事能用。
+
+**接入（每人一次）**：打开 [排版工具](https://fbifmp-layout.foodtalks.cn)，点左下角自己的头像 →「接入智能体」→「复制提示词」，发给你的智能体。它会把排版工具加上，带你用飞书登录、在确认页点「允许」。
+
+提示词和窗口里的一样，也可以直接从这里复制：
+
+<!-- agent-connect-prompt：由 public/js/agent-connect.js 生成（README_UPDATE=1 node --test tests/agent-connect.test.mjs），别手改 -->
+
+```text
+请帮我把「FBIF 排版工具」接进来。接好后，我就能让你按 FBIF 各个公众号和 FoodTalks 网站的样式排版、做 AI 校对。
+
+它是一个远程 MCP 服务器：
+- 名称：fbif-layout
+- 地址：https://fbifmp-layout.foodtalks.cn/mcp
+- 传输方式：Streamable HTTP
+- 登录：标准 MCP OAuth（自动发现、动态注册），不用钥匙。配置里不要填 headers、token、client_id。
+
+请按下面做：
+
+1. 加服务器。先认清你是哪个客户端，按对应的一条加到用户级（所有项目都能用）。已经有 fbif-layout 且地址一样就跳过；地址不一样就先删掉旧的再加。
+   - Codex（命令行、IDE 插件、桌面版共用 ~/.codex/config.toml）：codex mcp add fbif-layout --url https://fbifmp-layout.foodtalks.cn/mcp
+   - Claude Code：claude mcp add --transport http --scope user fbif-layout https://fbifmp-layout.foodtalks.cn/mcp
+   - Cursor：在 ~/.cursor/mcp.json 的 "mcpServers" 里加 "fbif-layout": {"url": "https://fbifmp-layout.foodtalks.cn/mcp"}
+   - VS Code（Copilot）：code --add-mcp '{"name":"fbif-layout","type":"http","url":"https://fbifmp-layout.foodtalks.cn/mcp"}'
+   - Gemini CLI：gemini mcp add --scope user --transport http fbif-layout https://fbifmp-layout.foodtalks.cn/mcp
+   - Windsurf（现名 Devin Desktop）：在它的 mcp_config.json（~/.codeium/windsurf/ 或 ~/.config/devin/ 下）的 "mcpServers" 里加 "fbif-layout": {"serverUrl": "https://fbifmp-layout.foodtalks.cn/mcp"}
+   - Claude 桌面版：不要用「添加自定义连接器」（那是从云端连过来，登录回不到这台电脑）。在 claude_desktop_config.json（设置 → 开发者 → 编辑配置）的 "mcpServers" 里加 "fbif-layout": {"command": "npx", "args": ["-y", "mcp-remote", "https://fbifmp-layout.foodtalks.cn/mcp"]}，要装了 Node.js；改完让我完全退出再打开 Claude 桌面版。
+   - 别的客户端：照它自己的文档，加一个上面这样的远程 MCP 服务器。
+   要写你自己的配置文件或连网，需要权限就向我申请；还是做不了（没有终端、改不了文件），就告诉我在哪里点、填什么，我自己来。
+
+2. 登录。触发 fbif-layout 的 OAuth 登录：
+   - Codex：加完会自己打开浏览器；没打开就运行 codex mcp login fbif-layout。IDE 插件、桌面版加完要重启（点 Restart）才连上。
+   - Claude Code：让我在 Claude Code 里输入 /mcp，选 fbif-layout，再选登录；也可以在终端运行 claude mcp login fbif-layout
+   - Cursor、VS Code、Windsurf：让我在 MCP 设置里点 fbif-layout 旁边的登录（Connect / Login / Start），弹窗问要不要登录就选允许
+   - Gemini CLI：让我输入 /mcp auth fbif-layout
+   - Claude 桌面版：重新打开后会自己打开浏览器
+   浏览器会打开 FBIF 登录页：我用飞书登录，再在确认页点「允许」。这一步只能我自己来，你不要代填任何东西。
+   如果报回调地址不对（redirect_uri），说明这个客户端是从云端连过来的，这里接不了，请告诉我改用上面列的客户端。
+
+3. 确认接好。用客户端自己的办法看 fbif-layout 已连上、已登录（比如 codex mcp list、claude mcp list）。多数客户端要新开一个对话才看得到新工具，需要的话告诉我。工具有四个：layout_article（排版）、get_layout_result（取没排完的那篇）、check_article（AI 校对）、prepare_upload（交 Word 前拿上传地址）。
+
+4. 用一两句话告诉我接好了，再教我这样用：
+   - 把稿子交给你：公众号或网页链接、飞书文档链接、Markdown、文字、Word 都行，说要排成哪个账号。你调 layout_article，把回来的编辑器链接给我；我打开链接，在排版工具里接着改，点「复制全文」粘进后台。
+   - 要校对就让你调 check_article，你把要改的地方列给我。
+   - 它只排版和校对，不存草稿、不发布，不碰任何平台。
+
+如果你是网页里的 ChatGPT、claude.ai 这类不在我电脑上运行的智能体，接不了（登录只能回到我自己的电脑），请直接告诉我改用上面列的客户端。
+```
+
+<!-- /agent-connect-prompt -->
+
+自己动手加也行：MCP 地址 `https://fbifmp-layout.foodtalks.cn/mcp`，远程 MCP（Streamable HTTP），OAuth 登录，不用钥匙。
+
+**怎么调用**：直接跟智能体说，比如「用 fbif-layout 把这篇排成 FBIF食品饮料创新：https://mp.weixin.qq.com/s/…」「把我刚写的这篇按 FoodTalks 网站排，再校对一下」「把 ~/Downloads/稿子.docx 排成什么是系列」。
+
+| 工具 | 做什么 |
+| --- | --- |
+| `layout_article` | 按某个账号的样式排一篇（`account` 加 `url`、`markdown`、`text`、`upload_id` 其中一个）；最多等 40 秒，排好给 `editor_url`，没排完给 `result_id` |
+| `get_layout_result` | 接着等没排完的那篇（`result_id`） |
+| `check_article` | AI 校对，和编辑器「AI 校对」同一套；模型要想两三分钟，没查完再调一次 |
+| `prepare_upload` | 排 Word 前拿一个 10 分钟内有效、只能用一次的上传地址 |
+
+`editor_url` 只有本人能打开，留 7 天。接法细节与维护见 [docs/agent-mcp.md](docs/agent-mcp.md)，为什么这么做见 [ADR](docs/adr/2026-11-18-agent-mcp.md)。
+
 ## 渠道与账号入口
 
 排版工具进入方式：
@@ -237,6 +303,9 @@ curl http://127.0.0.1:9000/api/health
 | `GET` | `/api/rules/admin/access-users` | 超级管理员读取已登录账号列表与后台角色 |
 | `PUT` | `/api/rules/admin/access-users/{id}` | 超级管理员授权/收回管理员角色；超级管理员只能通过 `RULE_SUPER_ADMIN_OPEN_IDS` 配置 |
 | `POST` | `/api/layout/v1/render` | 排版接口：交一篇、拿成品 HTML（或 202 + `poll_url`），需 `Authorization: Bearer flk_…`；`GET /api/layout/v1/operations/{id}` 取 202 的那篇；`GET /api/layout/v1/docs`、`/openapi.json` 是说明书，不用钥匙 |
+| `POST` | `/mcp` | 智能体入口（MCP，Streamable HTTP）：工具 `layout_article`、`get_layout_result`、`check_article`、`prepare_upload`，需 OAuth 访问令牌；接法见上「在智能体里用」与 [docs/agent-mcp.md](docs/agent-mcp.md)（红线 51） |
+| `GET` | `/.well-known/oauth-protected-resource[/mcp]`、`/.well-known/oauth-authorization-server` | MCP 授权的元数据：资源地址与授权服务器（本项目自己）；编辑器「接入智能体」窗口的 MCP 地址也从这里取 |
+| `GET` `POST` | `/oauth/authorize`、`/oauth/token`、`/oauth/register`、`/oauth/revoke` | MCP 授权：授权页（没登录跳统一登录，确认页点「允许」）、换令牌、动态注册（回调只收本机地址）、吊销 |
 | `POST` | `/api/render` | 程序化渲染，需 `Authorization: Bearer $RENDER_TOKEN` |
 | `POST` | `/api/html-to-blocks` | HTML 转中立 Block[]，需 Bearer token |
 | `POST` | `/api/publish/site-sync` | **只接收文章链接**：`url` + 可选 `rule_pack_id` + 分类证据。可选 `content_source_url` 只补「阅读原文」出处；可选 `status_callback_url`（只许指向 Feed 自己的域名）登记后，任务状态每变一次带签名推过去，见 [任务状态推送约定](docs/publish-status-callback.md)。带 `content_html` / `title` / `source_name` / `author` / `cover_url` 一律 400（见下方红线）。机器调用需 `X-Publish-Sync-Token` 与普通图文正向分类证据、有效 classifier version |

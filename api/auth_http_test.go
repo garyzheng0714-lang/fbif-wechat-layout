@@ -158,8 +158,8 @@ func TestPasswordUserCannotUseFeishuDocuments(t *testing.T) {
 	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil || meRec.Code != http.StatusOK {
 		t.Fatalf("me status=%d body=%s err=%v", meRec.Code, meRec.Body.String(), err)
 	}
-	if me.User.Name != "外部编辑" || me.User.AuthMode != string(authModePassword) || me.User.Capabilities.FeishuDocuments || me.User.Feishu != "none" {
-		t.Fatalf("account user must not get Feishu document capability: %+v", me.User)
+	if me.User.Name != "外部编辑" || me.User.AuthMode != string(authModePassword) || me.User.Capabilities.FeishuDocuments || me.User.Capabilities.Agent || me.User.Feishu != "none" {
+		t.Fatalf("account user must not get Feishu document or agent capability: %+v", me.User)
 	}
 
 	searchRec := httptest.NewRecorder()
@@ -194,7 +194,7 @@ func TestCurrentUserEndpointReportsLoginAndGrantState(t *testing.T) {
 	}
 
 	session := mustSessionForUser(t, service, authUser{
-		ID: fbifCompanyCode + ":on_new", Name: "新同事", CompanyCode: fbifCompanyCode, AuthMode: authModeFeishu, Status: authUserActive,
+		ID: fbifCompanyCode + ":on_new", Name: "新同事", CompanyCode: fbifCompanyCode, AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "on_new",
 	})
 	for _, tc := range []struct {
 		grant bool
@@ -211,7 +211,7 @@ func TestCurrentUserEndpointReportsLoginAndGrantState(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil || rec.Code != http.StatusOK {
 			t.Fatalf("me status=%d body=%s", rec.Code, rec.Body.String())
 		}
-		if payload.User.Feishu != tc.want || !payload.User.Capabilities.FeishuDocuments || payload.User.Role != string(authRoleUser) {
+		if payload.User.Feishu != tc.want || !payload.User.Capabilities.FeishuDocuments || !payload.User.Capabilities.Agent || payload.User.Role != string(authRoleUser) {
 			t.Fatalf("grant=%v user=%+v", tc.grant, payload.User)
 		}
 	}
@@ -549,5 +549,19 @@ func TestFeishuGrantRequestsDocumentAndWikiScopes(t *testing.T) {
 		if !found {
 			t.Fatalf("授权权限缺 %q，现在是 %v", want, scopes)
 		}
+	}
+}
+
+// 身份菜单的「接入智能体」（红线 51）：正式登录只给飞书登录的 FBIF 同事，和智能体每次调用查的是同一条。
+func TestAgentCapabilityOnlyForFeishuColleagues(t *testing.T) {
+	var sso ssoLogin
+	colleague := authUser{ID: fbifCompanyCode + ":on_a", AuthMode: authModeFeishu, FeishuUnionID: "on_a", Status: authUserActive}
+	vendor := authUser{ID: "account:recVendor", AuthMode: authModePassword, Status: authUserActive}
+	noUnion := authUser{ID: fbifCompanyCode + ":on_b", AuthMode: authModeFeishu, Status: authUserActive}
+	if !sso.agentCapable(colleague) || sso.agentCapable(vendor) || sso.agentCapable(noUnion) {
+		t.Fatalf("colleague=%v vendor=%v noUnion=%v", sso.agentCapable(colleague), sso.agentCapable(vendor), sso.agentCapable(noUnion))
+	}
+	if err := sso.agentCheck(context.Background(), vendor); err == nil || !strings.Contains(err.Error(), "飞书") {
+		t.Fatalf("账号密码登录的不能接智能体：%v", err)
 	}
 }

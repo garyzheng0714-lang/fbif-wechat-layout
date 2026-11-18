@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-18T12:22:35.644Z",
+  "at": "2026-11-18T14:31:29.298Z",
   "start": "/Users/simba/Agentic-Engineering/FBIF-排版工具/tools/sso-conformance.sh start",
   "hub_module": null,
   "results": [
@@ -218,7 +218,7 @@
     {
       "name": "浏览器里在登录中心点「使用飞书登录」：中心记住这个浏览器（HttpOnly、Secure、SameSite=Lax 的 cookie，30 天），之后这个浏览器打开别的项目去登录，中心不出登录页、直接送回那个项目的飞书登录（一处登录、处处登录）；账号密码登录、飞书客户端里不这样",
       "ok": false,
-      "error": "这个浏览器用飞书登过，去登录应直接回本项目的飞书入口（带 sid_hint），实际去了 http://127.0.0.1:52484/login"
+      "error": "这个浏览器用飞书登过，去登录应直接回本项目的飞书入口（带 sid_hint），实际去了 http://127.0.0.1:50188/login"
     },
     {
       "name": "浏览器里打开直接飞书登录（/auth/feishu/fbif/login）：转去登录中心（/auth/login，带上 next、不缓存），不建飞书登录事务；飞书客户端里照常直接去集成平台",
