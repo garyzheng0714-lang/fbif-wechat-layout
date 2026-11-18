@@ -56,6 +56,15 @@ type layoutResultJSON struct {
 	OutputHash string              `json:"output_hash" doc:"html 的 sha256（sha256: 开头）。两次结果一样，这个值就一样"`
 	Warnings   []layoutWarningJSON `json:"warnings" doc:"排好了但要留意的事，没有就是空数组。种类见「提醒」"`
 	RequestID  string              `json:"request_id" doc:"提交这篇时那次请求的编号，找人排查时报这个"`
+
+	// check 校对要看的标题和正文纯文字，和网页上「AI 校对」卡送去查的逐字一样（同一篇查一次）。不出接口，智能体入口用。
+	check articleCheckSource
+}
+
+// articleCheckSource 一篇送去校对的标题和正文纯文字。
+type articleCheckSource struct {
+	Title string `json:"title"`
+	Text  string `json:"text"`
 }
 
 type layoutAccountJSON struct {
@@ -315,21 +324,37 @@ func (a *layoutAPI) handleRender(w http.ResponseWriter, r *http.Request) {
 		a.reject(w, entry, layoutErr(layoutErrRenderFailed).withCause(err))
 		return
 	}
+	a.launch(op, entry, req, release, func(result layoutResultJSON, lerr *layoutError) {
+		a.ops.finish(op, layoutStoredFor(req.RequestID, result, lerr))
+	})
+	if !a.respond(w, r, op, req.Wait, entry.RequestID) {
+		// 调用方在拿到编号之前就断开了：没人能取这篇，停掉省资源。
+		op.cancel()
+	}
+}
+
+// launch 后台排一篇，排完交给 deliver、记一行日志。排版接口（handleRender）和智能体入口（agent_mcp.go）共用这一段：
+// 限额由调用方先拿到，release 在排完时放；所有输入最后都走 layout，所以成品只有一种排法。
+func (a *layoutAPI) launch(op *layoutOperation, entry layoutRequestLog, req layoutRequest, release func(), deliver func(layoutResultJSON, *layoutError)) {
 	ctx, cancel := context.WithTimeout(context.Background(), layoutOperationTimeout)
 	op.cancel = cancel
 	go func() {
 		defer release()
 		defer cancel()
-		resp, outcome := a.run(ctx, op, req)
-		a.ops.finish(op, resp)
+		result, lerr := a.layout(ctx, op, req)
 		done := entry
-		done.Status, done.Code, done.Images, done.Rule = resp.Status, outcome.Code, outcome.Images, outcome.Rule
+		done.Status = http.StatusOK
+		if lerr != nil {
+			if lerr.cause != nil {
+				log.Printf("layout-api: request_id=%s %v", req.RequestID, lerr)
+			}
+			done.Status, done.Code = lerr.spec().Status, string(lerr.Code)
+		} else {
+			done.Images, done.Rule = len(result.Images), fmt.Sprintf("%s@%d", result.Rule.PresetID, result.Rule.Revision)
+		}
+		deliver(result, lerr)
 		done.write(a.now())
 	}()
-	if !a.respond(w, r, op, req.Wait, entry.RequestID) {
-		// 调用方在拿到编号之前就断开了：没人能取这篇，停掉省资源。
-		cancel()
-	}
 }
 
 func (a *layoutAPI) handleOperation(w http.ResponseWriter, r *http.Request) {
@@ -397,24 +422,12 @@ func (a *layoutAPI) respond(w http.ResponseWriter, r *http.Request, op *layoutOp
 
 func layoutPollURL(id string) string { return "/api/layout/v1/operations/" + id }
 
-// layoutOutcome 一篇排完后给日志用的几样。
-type layoutOutcome struct {
-	Code   string
-	Images int
-	Rule   string
-}
-
-// run 后台排一篇：载体 → 排版程序 → 图片 → 结果。所有输入最后都走这里，所以 200 的形状只有一种。
-func (a *layoutAPI) run(ctx context.Context, op *layoutOperation, req layoutRequest) (layoutStoredResponse, layoutOutcome) {
-	result, lerr := a.layout(ctx, op, req)
-	if lerr == nil {
-		return layoutStoredResponse{Status: http.StatusOK, Body: layoutMarshal(result)},
-			layoutOutcome{Images: len(result.Images), Rule: fmt.Sprintf("%s@%d", result.Rule.PresetID, result.Rule.Revision)}
+// layoutStoredFor 排好的或出的错，存成接口回给调用方的那份。
+func layoutStoredFor(requestID string, result layoutResultJSON, lerr *layoutError) layoutStoredResponse {
+	if lerr != nil {
+		return layoutErrorResponse(requestID, lerr)
 	}
-	if lerr.cause != nil {
-		log.Printf("layout-api: request_id=%s %v", req.RequestID, lerr)
-	}
-	return layoutErrorResponse(req.RequestID, lerr), layoutOutcome{Code: string(lerr.Code)}
+	return layoutStoredResponse{Status: http.StatusOK, Body: layoutMarshal(result)}
 }
 
 func (a *layoutAPI) layout(ctx context.Context, op *layoutOperation, req layoutRequest) (layoutResultJSON, *layoutError) {
@@ -457,6 +470,7 @@ func (a *layoutAPI) layout(ctx context.Context, op *layoutOperation, req layoutR
 		OutputHash: "sha256:" + hex.EncodeToString(sum[:]),
 		Warnings:   warnings,
 		RequestID:  req.RequestID,
+		check:      out.Check,
 	}, nil
 }
 
@@ -510,6 +524,8 @@ type layoutRequest struct {
 	Title     string
 	Repost    *bool
 	Wait      time.Duration
+	// FeishuAsPerson 智能体替人排飞书文档时取这个人的飞书令牌（先用它读，读不到再用应用身份）；排版接口不填。
+	FeishuAsPerson func(context.Context) (string, error)
 }
 
 func parseLayoutWait(raw string, fallback, max time.Duration) (time.Duration, *layoutError) {

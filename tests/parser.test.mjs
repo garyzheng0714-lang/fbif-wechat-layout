@@ -5,7 +5,7 @@ import {
   esc, escAttr, extractParagraph, parseDocxStyles, parseMdRuns, parseMdFrontmatter,
   normalizeClipboardTextForMarkdown, hasImageLikeLink, formatPlainTextForCopy,
   looksLikeArticleClipboardText, buildClipboardArticleBlocks, buildTableBlock,
-  parseDocxNumbering
+  parseDocxNumbering, markdownFileBlocks, markdownFileTitle
 } from '../public/js/parser.js';
 import { createListMarkers } from '../public/js/docx-list-markers.js';
 
@@ -515,4 +515,45 @@ test('buildClipboardArticleBlocks 按锚文字把粘贴时记下的链接挂回�
     ],
   ]);
   assert.deepEqual(buildClipboardArticleBlocks('欢迎报名。').blocks[0].runs, [{ type: 'txt', text: '欢迎报名。' }]);
+});
+
+// .md 文件三个模板共用一套切分（红线 51：智能体交的 Markdown 和人上传的 .md 同一条路）。
+test('.md 文件按 Markdown 认结构：开头一级标题是文章标题，小标题、列表每一项、引用各自成段', () => {
+  const md = [
+    '# 植物基饮料的下一个十年',
+    '',
+    '作者：李四',
+    '这一行和上一行是同一段。',
+    '## 市场有多大 ##',
+    '- 燕麦奶：份额第一',
+    '* 豆奶：老牌品类',
+    '1. 先做口味',
+    '2) 再做渠道',
+    '> 「植物基不是替代，',
+    '> 是新的选择。」',
+    '紧跟引用的一行另起一段。',
+    '![图](https://img.test/a.png)',
+    '* * *',
+    '# 后面的一级标题是小标题',
+    '**加粗开头**不是列表。',
+  ].join('\n');
+  const blocks = markdownFileBlocks(md);
+  assert.deepEqual(blocks, [
+    { k: 'title', text: '植物基饮料的下一个十年' },
+    { k: 'p', text: '作者：李四\n这一行和上一行是同一段。' },
+    { k: 'h', level: 2, text: '市场有多大' },
+    { k: 'li', text: '• 燕麦奶：份额第一' },
+    { k: 'li', text: '• 豆奶：老牌品类' },
+    { k: 'li', text: '1. 先做口味' },
+    { k: 'li', text: '2) 再做渠道' },
+    { k: 'bq', text: '「植物基不是替代，\n是新的选择。」' },
+    { k: 'p', text: '紧跟引用的一行另起一段。' },
+    { k: 'p', text: '![图](https://img.test/a.png)' },
+    { k: 'p', text: '* * *' },
+    { k: 'h', level: 1, text: '后面的一级标题是小标题' },
+    { k: 'p', text: '**加粗开头**不是列表。' },
+  ]);
+  assert.equal(markdownFileTitle(blocks), '植物基饮料的下一个十年');
+  assert.equal(markdownFileTitle(markdownFileBlocks('正文先来\n\n# 不是标题')), '', '不在开头的一级标题不当文章标题');
+  assert.equal(markdownFileTitle(markdownFileBlocks('# **加粗的**[标题](https://a.test)')), '加粗的标题', '标题只留字');
 });

@@ -389,8 +389,14 @@ test('Caddy sends every API to Go before static fallback and keeps only named le
       const base = pattern.slice(0, -2);
       return route === base || route.startsWith(base + '/');
     }
+    if (pattern.endsWith('*')) return route.startsWith(pattern.slice(0, -1));
     return route === pattern;
   });
+  // 智能体入口（api/agent_mcp.go、api/internal/mcpauth）：MCP、授权、授权元数据都由 Go 回，不能落到静态 fallback。
+  for (const route of ['/mcp', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke',
+    '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server']) {
+    goRoutes.add(route);
+  }
   for (const route of goRoutes) {
     assert.ok(covered(route), `Go 路由 ${route} 未被 Caddy 白名单覆盖`);
   }

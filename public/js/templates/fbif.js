@@ -1,7 +1,7 @@
 // FBIF 公众号排版模板 — CSS class-based rendering
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter, looksLikeGifSource, convertRuns, convertText } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownFileBlocks, markdownFileTitle, markdownPlainText, looksLikeGifSource, convertRuns, convertText } = engineModule;
 const ruleModule = await import('../rule-presets.js' + assetQuery);
 const { getActiveRuleConfig, getActiveRuleBehavior, getRuleNumber, getRuleBoolean } = ruleModule;
 const behaviorModule = await import('../rule-behavior.js' + assetQuery);
@@ -412,16 +412,33 @@ function isStandardFooterPrompt(blocks, index) {
 
 // ---- Markdown Classification ----
 async function classifyMd(text) {
-  const { author: fmAuthor, title, content } = parseMdFrontmatter(text);
-  const rawParas = content.split(/\n\s*\n/).map(p => p.trim()).filter(p => p);
+  const { author: fmAuthor, title: fmTitle, content } = parseMdFrontmatter(text);
+  const blocks = markdownFileBlocks(content);
+  const title = fmTitle || markdownFileTitle(blocks);
 
   const elems = [];
   let imgN = 0, expectHeading = false, stopped = false, inRef = false;
   let author = fmAuthor, source = '';
 
-  for (let i = 0; i < rawParas.length && !stopped; i++) {
-    const para = rawParas[i].replace(/\s+$/gm, '');
-    if (/^#\s/.test(para)) continue;
+  for (let i = 0; i < blocks.length && !stopped; i++) {
+    const block = blocks[i];
+    if (block.k === 'title') continue;
+    if (block.k === 'h') {
+      expectHeading = false;
+      inRef = false;
+      elems.push({ k: 'h', text: markdownPlainText(block.text) });
+      continue;
+    }
+    if (block.k === 'bq') {
+      const bqText = block.text.split('\n').join(' ').trim();
+      if (bqText) { inRef = false; elems.push({ k: 'bq', runs: parseMdRuns(bqText) }); }
+      continue;
+    }
+    if (block.k === 'li') {
+      elems.push({ k: inRef ? 'ref' : 'txt', runs: parseMdRuns(block.text) });
+      continue;
+    }
+    const para = block.text;
     // Skip x-reader metadata lines（红线下放 behavior.params.md_metadata_skip_regex）
     if (behaviorRegexParam('md_metadata_skip_regex', RE_MD_METADATA_SKIP).test(para)) continue;
     if (/Author:.*\|.*Published:/i.test(para)) continue;
@@ -437,11 +454,6 @@ async function classifyMd(text) {
       continue;
     }
 
-    if (/^>\s/.test(para)) {
-      const bqText = para.split('\n').map(l => l.replace(/^>\s*/, '')).join(' ').trim();
-      if (bqText) { inRef = false; elems.push({ k: 'bq', runs: parseMdRuns(bqText) }); }
-      continue;
-    }
     if (/^[-*_\s]{3,}$/.test(para.replace(/\s/g, ''))) {
       if (/^\*\s+\*\s+\*/.test(para.trim())) stopped = true;
       continue;

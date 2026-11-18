@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-11T13:47:40.067Z",
+  "at": "2026-11-18T12:22:35.644Z",
   "start": "/Users/simba/Agentic-Engineering/FBIF-排版工具/tools/sso-conformance.sh start",
   "hub_module": null,
   "results": [
@@ -217,7 +217,8 @@
     },
     {
       "name": "浏览器里在登录中心点「使用飞书登录」：中心记住这个浏览器（HttpOnly、Secure、SameSite=Lax 的 cookie，30 天），之后这个浏览器打开别的项目去登录，中心不出登录页、直接送回那个项目的飞书登录（一处登录、处处登录）；账号密码登录、飞书客户端里不这样",
-      "ok": true
+      "ok": false,
+      "error": "这个浏览器用飞书登过，去登录应直接回本项目的飞书入口（带 sid_hint），实际去了 http://127.0.0.1:52484/login"
     },
     {
       "name": "浏览器里打开直接飞书登录（/auth/feishu/fbif/login）：转去登录中心（/auth/login，带上 next、不缓存），不建飞书登录事务；飞书客户端里照常直接去集成平台",
@@ -229,7 +230,8 @@
     },
     {
       "name": "在本项目退出（经登录中心飞书登录的会话）：告诉登录中心，中心通知别的项目（别的项目收到登录中心签给它的退出令牌）；之后 5 分钟内去登录带 prompt=login 出登录页、不自动登回来，登上就清掉；账号密码会话退出不通知别的项目",
-      "ok": true
+      "ok": false,
+      "error": "登上后再去登录还带 prompt=login 或没直接登"
     },
     {
       "name": "登录中心送来的退出令牌不对（typ 不是 logout+jwt、拿 sid_hint 冒充、头里没 typ、受众是别的系统、发证方不对、过期、没有或将来的发证时间、没有 sid、没有退出事件、带 nonce、没有 jti、别的钥匙签的、不签名）：一律 400、会话不动；对的令牌 200、会话下线",

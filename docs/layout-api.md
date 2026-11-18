@@ -66,8 +66,8 @@ curl -sS --max-time 130 \
 | `feishu_doc` 飞书云文档链接 | `url` | 粘贴飞书链接 | 原创 | docx、知识库文档链接；文档要先加「排版工具」应用，见「飞书文档」 |
 | `word` Word（.docx、.doc） | `file` | 上传 Word | 原创 | multipart/form-data 上传；文档里的图片会转存到 FBIF 的 OSS |
 | `html` 文章 HTML | `html` | （网页上没有这一项，按抓到的网页正文排） | 原创 | 图片写公开的 https 绝对地址 |
-| `markdown` Markdown | `markdown` | 上传 .md 文件 | 原创 | 图片用 ![](https://…) 写公开的绝对地址 |
-| `text` 纯文本 | `text` | 粘贴文字 | 原创 | 没有图片链接时只排正文、不加页脚；有图片链接时按 Markdown 排 |
+| `markdown` Markdown | `markdown` | 上传 .md 文件 | 原创 | 开头一行 # 标题 是文章标题，## 起是小标题，- 列表、> 引用照常写；图片用 ![](https://…) 写公开的绝对地址 |
+| `text` 纯文本 | `text` | 粘贴文字 | 原创 | 没有图片链接时逐行排正文，页脚和网页上粘贴文字一样（FBIF食品饮料创新、Wow Food、什么是系列不加）；有图片链接时按 Markdown 排 |
 
 `repost`：转载稿和原创稿的署名、页脚不一样。拿不准就不填，按网页上同样操作的默认排；返回的 `repost` 写着实际按哪种排的。
 
@@ -157,7 +157,7 @@ curl -sS --max-time 130 \
 
 ### Markdown（`markdown`）
 
-图片用 ![](https://…) 写公开的绝对地址。
+开头一行 # 标题 是文章标题，## 起是小标题，- 列表、> 引用照常写；图片用 ![](https://…) 写公开的绝对地址。
 
 ```bash
 curl -sS --max-time 130 \
@@ -169,7 +169,7 @@ curl -sS --max-time 130 \
 
 ### 纯文本（`text`）
 
-没有图片链接时只排正文、不加页脚；有图片链接时按 Markdown 排。
+没有图片链接时逐行排正文，页脚和网页上粘贴文字一样（FBIF食品饮料创新、Wow Food、什么是系列不加）；有图片链接时按 Markdown 排。
 
 ```bash
 curl -sS --max-time 130 \

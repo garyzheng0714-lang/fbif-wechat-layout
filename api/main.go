@@ -132,7 +132,9 @@ func main() {
 	mux.HandleFunc("GET /api/doc-cache/{hash}/{filename}", handleDocImageCache)
 
 	// 网页排版时的校对：与发布流水线同一套风险检查和校对复核，只查不建单（article_check.go）。
-	registerArticleCheckRoute(mux, authService, newArticleChecker())
+	// 智能体入口用同一个：同一篇在编辑器里、智能体里只查一次。
+	articleChecker := newArticleChecker()
+	registerArticleCheckRoute(mux, authService, articleChecker)
 
 	registerRulePresetHandlers(mux, ruleStore, authService)
 	registerRuleAdminAccessHandlers(mux, authService)
@@ -140,7 +142,18 @@ func main() {
 	// 程序化排版 API（/api/render 代理 + /api/html-to-blocks，Bearer RENDER_TOKEN）
 	registerRenderRoutes(mux)
 	// 排版接口 v1（/api/layout/v1/*，flk_ 钥匙，名单在中台配置包 api_callers）：只排版，不建发布单。
-	registerLayoutAPIRoutes(mux, newLayoutAPIFromEnv(ruleStore, authService))
+	layoutAPI := newLayoutAPIFromEnv(ruleStore, authService)
+	registerLayoutAPIRoutes(mux, layoutAPI)
+	// 智能体入口（MCP，/mcp）：同事在 Codex、Claude Code 里授权登录后排版、校对，排好给编辑器链接；不碰任何平台。
+	if err := registerAgentEntry(mux, agentDeps{
+		auth:     authService,
+		layout:   layoutAPI,
+		checker:  articleChecker,
+		stateDir: filepath.Dir(authUsersPath(*rulesPath)),
+		issuer:   publishPreviewBaseURL(),
+	}); err != nil {
+		log.Fatalf("智能体入口启动失败：%v", err)
+	}
 
 	// 发布流水线（公众号 → FoodTalks 网站）：JSON 任务存储 + 状态机 + 人审端点。
 	// 机器提交使用最小权限同步凭证；人工管理使用登录会话角色，生产 HTTP 审核默认关闭。

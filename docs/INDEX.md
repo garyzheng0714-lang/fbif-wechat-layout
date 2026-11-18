@@ -27,6 +27,7 @@
 - [微信草稿存活复制规范](../openspec/specs/wechat-draft-survival-copy/spec.md)
 - [正文块格式](article-blocks.md)（[JSON Schema](article-blocks.schema.json)）：公众号、FoodTalks、第三方平台共用的中间格式；由 `api/article_blocks.go` 生成，别手改。
 - **排版接口**（`/api/layout/v1/*`，给公司内部系统和同事用，只排版、不建发布单）：[对外说明书](layout-api.md)（由 `api/layout_api_doc.go` 生成，线上 `/api/layout/v1/docs` 就是它，别手改）、[维护说明](layout-api-maintenance.md)（怎么运转、坏了去哪看、常见改动）、[为什么这么做](adr/2026-10-26-layout-api.md)（和网页共用同一份排版函数，逐字一样）。
+- **智能体入口**（`/mcp`，同事在 Codex、Claude Code 里授权登录后排版、校对，排好给编辑器链接，不碰平台）：[接法与维护](agent-mcp.md)、[为什么这么做](adr/2026-11-18-agent-mcp.md)（本项目自己当授权服务器、认人走统一登录）。
 - [外发通用版正文块](distribution-blocks.md)：交给分发服务的块有哪几种、各平台一样的规则改写前后；由测试按现在的代码生成。每种块在各平台写成什么、标题封面限制、编辑器里怎么点，只在分发服务仓库的 `docs/platforms/<平台>.md`。
 
 ### FoodTalks

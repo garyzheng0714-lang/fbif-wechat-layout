@@ -83,6 +83,21 @@ for (const account of ACCOUNTS) {
   }
 }
 
+// .md 文件按 Markdown 认结构（parser.js markdownFileBlocks，三个模板共用；智能体交的 Markdown 也走这里，红线 51）：
+// 不管哪个账号，成品里都不许漏出 #、-、> 记号（页脚自带的「* 本文为…」是规定样式，不算）；开头一行 # 是文章标题，## 是小标题。
+test('Markdown 文件：每个账号都不漏记号，开头 # 是标题、## 是小标题', async () => {
+  const input = await INPUTS.markdown();
+  for (const account of ACCOUNTS) {
+    const out = await engine.layout({ account, title: '', repost: null, input });
+    const lines = out.html.replace(/<[^>]+>/g, '\n').split('\n').map(line => line.trim()).filter(Boolean);
+    for (const line of lines) assert.doesNotMatch(line, /^(#{1,6}|-|>|&gt;)\s/, `${account} 漏了 Markdown 记号：${line}`);
+    assert.ok(lines.includes('市场有多大') && lines.includes('品牌怎么做'), `${account} 的 ## 小标题没单独成行`);
+    assert.ok(lines.some(line => line.endsWith('燕麦奶：份额第一')) && lines.some(line => line.endsWith('豆奶：老牌品类')), `${account} 的列表项没各自成行`);
+    assert.equal(out.title, '植物基饮料的下一个十年', `${account} 没把开头 # 那行当标题`);
+    assert.ok(!lines.includes('植物基饮料的下一个十年'), `${account} 把标题又排进了正文`);
+  }
+});
+
 test('排版接口：没有的账号、规则读不到、空文字都按错误码回', async () => {
   await assert.rejects(engine.layout({ account: 'nope', input: { kind: 'text', text: 'x' } }), { code: 'unknown_account' });
   await assert.rejects(engine.layout({ account: 'fbif', input: { kind: 'text', text: '   ' } }), { code: 'empty_article' });

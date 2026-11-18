@@ -469,7 +469,15 @@ export function bindUrlImportShortcuts({
     urlInput.focus();
     submitImportValue(text);
   });
-  if (!urlInput) return;
+  const api = {
+    // submit 和在框里粘贴一样提交（智能体交接用）：框里换成这段字、不带粘贴时记下的链接。
+    submit(value) {
+      if (!urlInput) return false;
+      writeImportLinks(urlInput, []);
+      return submitImportValue(value);
+    },
+  };
+  if (!urlInput) return api;
   urlInput.addEventListener('input', event => {
     if (!(urlInput.value || '').trim()) {
       writeImportLinks(urlInput, []);
@@ -506,6 +514,7 @@ export function bindUrlImportShortcuts({
       submitImportValue(urlInput.value);
     }
   });
+  return api;
 }
 
 // 复制后的「去后台粘贴」引导（概念 A：复制键就地变身 + 旁边内联出现后台入口）。

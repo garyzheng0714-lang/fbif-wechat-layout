@@ -10,13 +10,15 @@ const assetQuery = new URL(import.meta.url).search;
 // re-exports below, so one dynamic import here fixes the whole chain.
 const parserModule = await import('./parser.js' + assetQuery);
 const {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, normalizeClipboardTextForMarkdown,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, markdownFileBlocks, markdownFileTitle, markdownPlainText,
+  normalizeClipboardTextForMarkdown,
   hasImageLikeLink, formatPlainTextForCopy, looksLikeArticleClipboardText,
   buildClipboardArticleBlocks, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
 } = parserModule;
 export {
-  esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, normalizeClipboardTextForMarkdown,
+  esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownLineBody, markdownFileBlocks, markdownFileTitle, markdownPlainText,
+  normalizeClipboardTextForMarkdown,
   hasImageLikeLink, formatPlainTextForCopy, looksLikeArticleClipboardText,
   buildClipboardArticleBlocks, parseDocx, extractParagraph,
   W, R, WP, A, findAll, findOne, findDeep, wattr, rattr
@@ -34,7 +36,7 @@ import { readImportLinks, writeImportLinks } from './clipboard-links.js';
 import { createCopySession } from './copy-session.js';
 import { loadThemeCSS, processForCopy, applyThemeVars } from './css-inline.js';
 import { normalizeWechatRichHtml } from './wechat-normalize.js';
-import { fixHtmlLines, fixPlainText } from './text-fixes.js';
+import { articleText, fixHtmlLines, fixPlainText } from './text-fixes.js';
 import {
   loadCards as loadMoreArticlesCards,
   saveCards as saveMoreArticlesCards,
@@ -657,9 +659,13 @@ export async function layoutArticleForCopy(template, input, {
   const sourceArtifact = materialized.articleCopy + '\n' + (footer ? materialized.footerCopy : '');
   const config = (window._activeConfig && window._activeConfig.config) || {};
   const html = withPasteTail(inlineCopyHtml(sourceArtifact, await _themeCSSReady, config));
+  const title = result.title || input.title || '';
   return {
     html,
-    title: result.title || input.title || '',
+    title,
+    // 校对看的标题和正文纯文字：和网页「AI 校对」卡（article-check.js sessionSource）送去查的逐字一样。
+    checkTitle: bodyOnly ? '' : title,
+    checkText: articleText(result.lines),
     footer,
     isRepost,
     articleMeta,
@@ -1076,6 +1082,8 @@ export function initApp(initialTemplate) {
     handleUploadFiles(fileInput.files, { isRepost: false });
     fileInput.value = '';
   });
+  // 和点上传、拖进来同一条路（智能体交接把 .md、Word 交到这里，agent-handoff.js）。
+  window._uploadFiles = files => handleUploadFiles(files, { isRepost: false });
   if (removeUpload) {
     removeUpload.addEventListener('click', e => {
       e.preventDefault();

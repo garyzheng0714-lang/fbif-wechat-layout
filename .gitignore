@@ -28,6 +28,8 @@ docs/*
 # 排版接口：对外说明书由测试从代码生成、测试也拿它比对；维护说明是给维护者（含 AI）看的
 !docs/layout-api.md
 !docs/layout-api-maintenance.md
+# 智能体入口：同事接法与维护说明（CLAUDE.md 红线 51 引用）
+!docs/agent-mcp.md
 # 统一登录合规测试结果：上线前全过的凭据（tools/sso-conformance.sh 生成）
 !docs/sso-conformance.json
 # 跨系统接口约定：资讯订阅照它们对接，必须随仓库走

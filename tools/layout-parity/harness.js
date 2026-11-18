@@ -1,7 +1,7 @@
 // 在网页编辑器里跑：照人的操作导入一篇、点复制，把剪贴板里的 HTML 存成金样。
 // 由 server.mjs 提供，浏览器控制台里 `await import('http://127.0.0.1:19192/harness.js')` 后调
 // `await window.__layoutCapture({ account, input })`。用法见 README.md。
-const HELPER = 'http://127.0.0.1:19192';
+const HELPER = new URL(import.meta.url).origin; // 从哪儿加载就回哪儿（127.0.0.1 或 localhost 都行）
 
 // 图片地址两边一定不同（网页转 blob/data，接口转存 OSS），金样里统一换成 IMG。
 export function normalizeImageSources(html) {

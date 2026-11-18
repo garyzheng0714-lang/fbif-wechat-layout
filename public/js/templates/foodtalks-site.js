@@ -12,7 +12,7 @@
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter, endsWithEnglishAbbreviation } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownFileBlocks, markdownFileTitle, endsWithEnglishAbbreviation } = engineModule;
 // 等价于: import { applyFoodTalksBehavior, FBIF_FOOTER_HTML } from '../rule-behavior-foodtalks.js'
 // 用动态 import 是为了配合浏览器端的 cache-busting assetQuery
 const behaviorModule = await import('../rule-behavior-foodtalks.js' + assetQuery);
@@ -1056,27 +1056,30 @@ function extractDocxSummary(elems, config = {}) {
 
 async function classifyMd(text) {
   const fm = parseMdFrontmatter(text);
-  const body = fm.body || text;
-  const lines = body.split(/\r?\n/);
+  const body = fm.content || text;
   const elems = [];
   let imgN = 0;
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    let m;
-    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
-      const sourceLevel = m[1].length;
-      const mapped = sourceLevel >= 4 ? 4 : (sourceLevel === 3 ? 3 : 2);
-      elems.push({ k: 'h', level: resolveSiteHeadingLevel(m[2], mapped), runs: parseMdRuns(m[2]) });
+  // 结构与公众号同一套切分（parser.js markdownFileBlocks）：开头的一级标题是文章标题、不进正文；
+  // 小标题照记号定级，列表、引用去掉记号，别的仍一行一段。
+  const blocks = markdownFileBlocks(body);
+  for (const block of blocks) {
+    if (block.k === 'title') continue;
+    if (block.k === 'h') {
+      const mapped = block.level >= 4 ? 4 : (block.level === 3 ? 3 : 2);
+      elems.push({ k: 'h', level: resolveSiteHeadingLevel(block.text, mapped), runs: parseMdRuns(block.text) });
       continue;
     }
-    if ((m = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/))) {
-      elems.push({ k: 'img', src: m[2], alt: m[1] });
-      imgN += 1;
-      continue;
+    for (const line of block.text.split('\n')) {
+      let m;
+      if (block.k === 'p' && (m = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/))) {
+        elems.push({ k: 'img', src: m[2], alt: m[1] });
+        imgN += 1;
+        continue;
+      }
+      elems.push({ k: 'p', runs: parseMdRuns(line) });
     }
-    elems.push({ k: 'p', runs: parseMdRuns(line) });
   }
-  return { elems, imgN, title: (fm.frontmatter && fm.frontmatter.title) || '' };
+  return { elems, imgN, title: fm.title || markdownFileTitle(blocks) };
 }
 
 // ---- Blocks 分类（从后端 /api/fetch-article 来的结构化块） ----

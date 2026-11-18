@@ -68,6 +68,18 @@ fbifmp-layout.foodtalks.cn {
 		reverse_proxy localhost:9001
 	}
 
+	# 智能体入口（MCP，api/agent_mcp.go）：MCP、授权页与换令牌（/oauth/*）、授权元数据（/.well-known/oauth-*）都在 Go。
+	# 排版一次最多等 40 秒，超时与 /api 一样放宽。
+	@fbifAgent path /mcp /oauth/* /.well-known/oauth-*
+	handle @fbifAgent {
+		reverse_proxy localhost:9001 {
+			transport http {
+				read_timeout 180s
+				write_timeout 180s
+			}
+		}
+	}
+
 	@fbifAPI path /api /api/*
 	handle @fbifAPI {
 		reverse_proxy localhost:9001 {

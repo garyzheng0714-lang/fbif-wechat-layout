@@ -38,6 +38,8 @@ type loginBackend interface {
 	wrap(next http.Handler) http.Handler
 	// page 包住发页面的处理：没登录打开页面当场跳去登录、登完回到这一页。
 	page(next http.Handler) http.Handler
+	// agentCheck 这个人现在能不能让智能体替他用排版工具（agent_mcp.go 每次调用、每次换令牌都问）。
+	agentCheck(ctx context.Context, user authUser) error
 	shutdown(ctx context.Context) error
 }
 
@@ -196,6 +198,7 @@ func (s *authService) onLogin(_ context.Context, id auth.Identity) (string, erro
 
 type ssoLogin struct {
 	sso    *auth.SSO
+	store  *auth.FileStore
 	grants *feishugrant.Grants
 }
 
@@ -241,7 +244,7 @@ func newSSOLogin(ctx context.Context, service *authService, stateDir string) (*s
 	if err != nil {
 		return nil, err
 	}
-	login := &ssoLogin{sso: sso}
+	login := &ssoLogin{sso: sso, store: store}
 	if service.config.FeishuAppID == "" || service.config.FeishuSecret == "" || feishuGrantRedirectURL() == "" {
 		log.Printf("auth: 飞书应用没配全，谁都授权不了飞书（搜文档、导入、列群用不了）")
 		return login, nil
@@ -308,6 +311,25 @@ func (l *ssoLogin) shutdown(ctx context.Context) error { return l.sso.Shutdown(c
 
 func (l *ssoLogin) page(next http.Handler) http.Handler { return l.sso.RequirePage(next) }
 
+// agentCheck 智能体拿的是自己的令牌、不走登录会话，登录模板的停用名单要在这里查：只放 FBIF 飞书登录的同事，
+// 离职、停用（登录中心推来的名单）的当场不让用；名单没同步过、读不出来也不放，和登录时一样。
+func (l *ssoLogin) agentCheck(ctx context.Context, user authUser) error {
+	if feishuAppFor(user.ID) == "" || user.FeishuUnionID == "" {
+		return errors.New("只有用飞书登录的 FBIF 同事能让智能体用排版工具")
+	}
+	if _, synced, err := l.store.BlocklistRevision(ctx); err != nil || !synced {
+		return errors.New("停用名单读不出来，过一会儿再试")
+	}
+	entry, err := l.store.BlockedEntry(ctx, user.FeishuUnionID)
+	if err != nil {
+		return errors.New("停用名单读不出来，过一会儿再试")
+	}
+	if entry != nil {
+		return errors.New("这个账号已停用")
+	}
+	return nil
+}
+
 // machinePathPrefixes 是机器调的接口（监控端交稿、飞书卡片回调、排版接口、程序化排版、监控告警），各用自己的钥匙，
 // 不是人的操作：不认人、不记登录日志。
 var machinePathPrefixes = []string{
@@ -318,6 +340,14 @@ var machinePathPrefixes = []string{
 	"/api/layout/v1/",
 	"/api/render",
 	"/api/html-to-blocks",
+	// 智能体（agent_mcp.go）：MCP 和换令牌、注册、吊销用自己的令牌，传 Word 用一次性地址。
+	// 授权页 /oauth/authorize 是人在浏览器里点的，不在这里。
+	"/mcp",
+	"/oauth/token",
+	"/oauth/register",
+	"/oauth/revoke",
+	"/.well-known/oauth-",
+	"/api/agent/uploads/",
 }
 
 func machinePath(path string) bool {
@@ -334,7 +364,7 @@ func machinePath(path string) bool {
 // 登录模板自己的路由（/api/me、/auth/*）它自己把门，这里不再认一遍。
 func (l *ssoLogin) wrap(next http.Handler) http.Handler {
 	probed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/me" {
+		if !identifiedPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -370,6 +400,14 @@ func (l *ssoLogin) wrap(next http.Handler) http.Handler {
 		}
 		logged.ServeHTTP(w, r)
 	})
+}
+
+// identifiedPath 要认人的路径：/api/ 下的接口（/api/me 登录模板自己认），和智能体的授权页（人在浏览器里点「允许」）。
+func identifiedPath(path string) bool {
+	if path == "/api/me" {
+		return false
+	}
+	return strings.HasPrefix(path, "/api/") || path == agentAuthorizePath
 }
 
 // probeRecorder 接住登录模板认人失败时写的回答（不给浏览器），只留状态码和 Set-Cookie。

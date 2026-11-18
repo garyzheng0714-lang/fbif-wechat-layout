@@ -30,7 +30,7 @@ Node 不是另写一套排版，是**把网页编辑器的代码原样跑一遍*
 
 - `render-service/layout.mjs` 在 Node 里装好浏览器那几样（`window`、`localStorage`、`DOMParser`、`JSZip`、只认站内地址的假 `fetch`），从 `PUBLIC_DIR` 加载 `public/js/engine.js`、模板、规则包，调网页「导入 → 复制」同一个函数 `engine.layoutArticleForCopy`。
 - 网页编辑器本身也走这个函数和 `public/js/engine-config.js`（规则 → 渲染配置，`app.html`、`site.html` 都调它）。所以改排版只改网页那份代码，接口自动跟着变。
-- 载体照网页的入口拼：链接=抓到的块（默认转载）、Word=docx（默认原创，标题取文件名）、Markdown=md 文件、文字=粘贴（没图片链接只排正文、不加页脚）。FoodTalks 账号先 `extractSiteSummary` 拿走导语当 `summary`（同 `site.html`）。
+- 载体照网页的入口拼：链接=抓到的块（默认转载）、Word=docx（默认原创，标题取文件名）、Markdown=md 文件、文字=粘贴（没图片链接逐行排正文，页脚和网页粘贴一样看账号）。FoodTalks 账号先 `extractSiteSummary` 拿走导语当 `summary`（同 `site.html`）。
 - 每篇开一个干净的本地存储：等于「新导入、没手改过」的网页状态。
 
 **看守**：`tests/layout-parity.test.mjs` 拿网页真抓的复制结果（`tests/fixtures/layout-parity/`）比 5 账号 × 5 输入，逐字一样；`tests/layout-server.test.mjs` 真起一个进程排。**只允许两处不同**：图片地址（样稿统一写 `IMG`）；公众号账号不出「更多文章」（接口传 `footerVisibilityOverride: {blocks: {more_articles: false}}`，样稿也是网页上关掉这一块再抓的）。

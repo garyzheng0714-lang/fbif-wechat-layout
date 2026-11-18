@@ -91,12 +91,29 @@ func (o *layoutFeishuOutcome) get() (size int, tokenErr, exportErr error) {
 	return o.size, o.tokenErr, o.exportErr
 }
 
-// export 导出一篇，等到导完或 ctx 到点。每篇用自己的任务主人（layout-api:操作编号），不会顶掉别的导出。
+// exportAs 智能体替人排时先用这个人自己的飞书授权读（他读得到的文档都行，不用加应用）；
+// 他没授权、读不到，再用应用身份读，这时出的错和排版接口一样（没加应用就说加应用）。person 为 nil 只用应用身份。
+func (f *layoutFeishu) exportAs(ctx context.Context, opID, requestID string, ref feishuDocumentRef, person func(context.Context) (string, error)) (layoutFeishuDoc, *layoutError) {
+	if person != nil {
+		doc, lerr := f.exportWith(ctx, opID+"-person", requestID, ref, person)
+		if lerr == nil || (lerr.Code != layoutErrFeishuNotShared && lerr.Code != layoutErrFeishuUnavailable) || ctx.Err() != nil {
+			return doc, lerr
+		}
+	}
+	return f.exportWith(ctx, opID, requestID, ref, f.token)
+}
+
+// export 用应用身份导出一篇，等到导完或 ctx 到点。
 func (f *layoutFeishu) export(ctx context.Context, opID, requestID string, ref feishuDocumentRef) (layoutFeishuDoc, *layoutError) {
+	return f.exportWith(ctx, opID, requestID, ref, f.token)
+}
+
+// exportWith 每篇用自己的任务主人（layout-api:操作编号），不会顶掉别的导出。
+func (f *layoutFeishu) exportWith(ctx context.Context, opID, requestID string, ref feishuDocumentRef, tokenFor func(context.Context) (string, error)) (layoutFeishuDoc, *layoutError) {
 	owner := "layout-api:" + opID
 	outcome := &layoutFeishuOutcome{}
 	job, err := f.jobs.create(owner, func(jobCtx context.Context, _ feishuExportProgressReporter) (preparedFeishuDocument, error) {
-		token, err := f.token(jobCtx)
+		token, err := tokenFor(jobCtx)
 		if err != nil {
 			outcome.set(err, nil, 0)
 			return preparedFeishuDocument{}, err

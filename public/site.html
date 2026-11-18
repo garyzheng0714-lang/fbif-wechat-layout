@@ -1359,7 +1359,7 @@ window.addEventListener('fbif:article-input-started', event => {
   if (window.fetchArticle && typeof window.fetchArticle.invalidate === 'function') window.fetchArticle.invalidate();
 });
 
-bindUrlImportShortcuts({
+const urlImport = bindUrlImportShortcuts({
   documentRef: document,
   fetchArticle: () => window.fetchArticle(),
   importText: importClipboardText,
@@ -1606,6 +1606,14 @@ document.addEventListener('click', event => {
     renderControls(); paint(); persist(true);
   });
 })();
+
+// 智能体排的那一篇（?agent=<编号>）：按智能体交来的同一份输入导入，和人自己粘贴、上传一样（红线 51）。
+const { runAgentHandoff } = await import('/js/agent-handoff.js?v=' + assetVersion);
+void runAgentHandoff({
+  submit: value => urlImport.submit(value),
+  importText: importClipboardText,
+  uploadFile: file => window._uploadFiles([file]),
+});
 
 // 启动到这里，账号、规则、上次的稿子、左栏都就位了才露出页面，不让人看到半成品再变样（卡住时 auth-editor.css 兜底）。
 document.body.classList.remove('boot-pending');

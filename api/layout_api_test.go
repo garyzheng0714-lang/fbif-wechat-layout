@@ -78,12 +78,13 @@ type fakeLayoutNode struct {
 	html     func(req layoutNodeRequest) string
 	err      *layoutError
 	warnings string
+	check    articleCheckSource // 排版程序给的校对原文
 }
 
 func (n *fakeLayoutNode) Layout(ctx context.Context, req layoutNodeRequest) (layoutNodeResult, *layoutError) {
 	n.mu.Lock()
 	n.requests = append(n.requests, req)
-	block, started, makeHTML, failure, warnings := n.block, n.started, n.html, n.err, n.warnings
+	block, started, makeHTML, failure, warnings, check := n.block, n.started, n.html, n.err, n.warnings, n.check
 	n.mu.Unlock()
 	if started != nil {
 		started <- struct{}{}
@@ -110,7 +111,7 @@ func (n *fakeLayoutNode) Layout(ctx context.Context, req layoutNodeRequest) (lay
 		HTML: html, Title: "排版程序给的标题", Summary: "", Repost: repost, Footer: true,
 		Stats: layoutNodeStats{Images: 0, Headings: 2},
 		Rule:  layoutRuleJSON{PresetID: req.Account + "-preset", Revision: 7, ConfigHash: "cfg"},
-		Build: "build-sha", Warnings: json.RawMessage(warnings),
+		Build: "build-sha", Warnings: json.RawMessage(warnings), Check: check,
 	}, nil
 }
 
@@ -745,7 +746,8 @@ func TestLayoutAPIRoutesRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(main), "registerLayoutAPIRoutes(mux, newLayoutAPIFromEnv(ruleStore, authService))") {
+	if !strings.Contains(string(main), "layoutAPI := newLayoutAPIFromEnv(ruleStore, authService)") ||
+		!strings.Contains(string(main), "registerLayoutAPIRoutes(mux, layoutAPI)") {
 		t.Fatal("main.go 要注册排版接口")
 	}
 }

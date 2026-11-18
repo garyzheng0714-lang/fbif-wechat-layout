@@ -739,6 +739,77 @@ export function markdownLineBody(line) {
     .replace(/^[-*+]\s+/, '• ');
 }
 
+// .md 文件按 Markdown 认结构（三个模板的 .md 导入共用；智能体交的 Markdown 也走这里，红线 51）：
+// 标题行、列表每一项、引用、分隔线、单独一行的图片各自成段，别的照空行分段（段内换行原样交给模板）。
+// 块：{ k: 'title', text } 开头那行一级标题＝文章标题｜{ k: 'h', level, text } 小标题（记号去掉）｜
+// { k: 'li', text } 列表项（无序换成「•」，「1.」留着）｜{ k: 'bq', text } 引用（记号去掉，连着几行用换行接）｜
+// { k: 'p', text } 别的。
+const MD_FILE_HEADING_RE = /^(#{1,6})\s+(.*?)(?:\s+#+)?$/;
+const MD_FILE_RULE_RE = /^([-*_])(?:\s*\1){2,}$/;
+const MD_FILE_BULLET_RE = /^[-*+]\s+(.+)$/;
+const MD_FILE_ORDERED_RE = /^\d{1,3}[.)]\s+\S/;
+const MD_FILE_QUOTE_RE = /^>\s?(.*)$/;
+const MD_FILE_IMAGE_RE = /^!\[[^\]]*\]\([^)]+\)$/;
+
+export function markdownFileBlocks(text) {
+  const blocks = [];
+  let para = [];
+  let quote = null;
+  const flush = () => {
+    if (para.length) blocks.push({ k: 'p', text: para.join('\n') });
+    para = [];
+    quote = null;
+  };
+  for (const raw of String(text || '').replace(/\r\n?/g, '\n').split('\n')) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+    let m;
+    if ((m = line.match(MD_FILE_QUOTE_RE))) {
+      if (quote) { quote.text += '\n' + m[1].trim(); continue; }
+      flush();
+      quote = { k: 'bq', text: m[1].trim() };
+      blocks.push(quote);
+      continue;
+    }
+    if (MD_FILE_RULE_RE.test(line) || MD_FILE_IMAGE_RE.test(line)) {
+      flush();
+      blocks.push({ k: 'p', text: line });
+      continue;
+    }
+    if ((m = line.match(MD_FILE_HEADING_RE))) {
+      flush();
+      if (m[2]) blocks.push({ k: 'h', level: m[1].length, text: m[2] });
+      continue;
+    }
+    if ((m = line.match(MD_FILE_BULLET_RE))) {
+      flush();
+      blocks.push({ k: 'li', text: '• ' + m[1] });
+      continue;
+    }
+    if (MD_FILE_ORDERED_RE.test(line)) {
+      flush();
+      blocks.push({ k: 'li', text: line });
+      continue;
+    }
+    if (quote) flush();
+    para.push(line);
+  }
+  flush();
+  if (blocks[0] && blocks[0].k === 'h' && blocks[0].level === 1) blocks[0] = { k: 'title', text: blocks[0].text };
+  return blocks;
+}
+
+// markdownFileTitle：开头那行一级标题的字（没有回空串）。
+export function markdownFileTitle(blocks) {
+  const first = blocks && blocks[0];
+  return first && first.k === 'title' ? markdownPlainText(first.text) : '';
+}
+
+// 标题里的 Markdown 行内记号（加粗、链接）只留字。
+export function markdownPlainText(text) {
+  return parseMdRuns(String(text || '')).map(run => run.text || '').join('').trim();
+}
+
 const MD_INLINE_RE = /\*\*[^*]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)/;
 // 标题、列表行不算正文段，不拿来判断这篇靠什么分段。
 const CLIPBOARD_NON_BODY_LINE_RE = /^(#{1,6}\s|[-*+•·]\s|\d{1,3}[.、)）]\s?)/;

@@ -9,7 +9,7 @@
 //   粘贴链接   editor-shell.js createUrlImportHandler → _handleBlocks(isRepost=true)；FoodTalks 先 extractSiteSummary 摘走导语
 //   上传 Word  handleFile → parseDocx → processDocx（isRepost=false）
 //   上传 .md   handleFile → processMd；阅读模式抓回的 Markdown 也走这里（isRepost=true）
-//   粘贴文字   _handleText：没有图片链接逐行排正文、不加页脚（行首记号与行内链接、加粗照 Markdown 认），有图片链接按 Markdown 排
+//   粘贴文字   _handleText：没有图片链接逐行排正文（页脚看账号；行首记号与行内链接、加粗照 Markdown 认），有图片链接按 Markdown 排
 //
 // 和旧的 render.mjs（/render，发布流水线与 Feed 在用）是两个进程，互不 import、全局互不影响。
 // 全局状态（规则、模板、localStorage）按篇重置，所以一次只排一篇：layout() 自己排队。
@@ -271,6 +271,7 @@ export async function loadLayoutEngine({ publicDir, fetchRules, origin, build = 
       build,
       output_hash: 'sha256:' + createHash('sha256').update(out.html).digest('hex'),
       warnings: [],
+      check: { title: out.checkTitle, text: out.checkText },
     };
   }
 

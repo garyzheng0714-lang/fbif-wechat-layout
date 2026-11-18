@@ -10,7 +10,7 @@
 
 const assetQuery = new URL(import.meta.url).search;
 const engineModule = await import('../engine.js' + assetQuery);
-const { esc, escAttr, parseMdRuns, parseMdFrontmatter, convertRuns, looksLikeGifSource } = engineModule;
+const { esc, escAttr, parseMdRuns, parseMdFrontmatter, markdownFileBlocks, markdownFileTitle, markdownPlainText, convertRuns, looksLikeGifSource } = engineModule;
 const behaviorModule = await import('../rule-behavior-foodtalks-series.js' + assetQuery);
 const {
   classifySeries, extractSeriesAuthorName, sectionImageUrl, isSiteArticleLayout, adaptSiteArticle,
@@ -483,16 +483,26 @@ export default {
     const config = withRuleConfig((opts && opts.config) || {});
     const fm = parseMdFrontmatter(text);
     const body = (fm && fm.content) || text;
-    // 最小 MD 支持：按段落转 runs，交给同一分类/渲染（标题靠正文编号正则识别）。
-    const paras = String(body).split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-    const neutral = paras.map(p => ({ k: 'txt', runs: parseMdRuns(p), text: p }));
+    // Markdown 结构与 fbif、网站同一套切分（parser.js markdownFileBlocks）：开头的一级标题是文章标题、不进正文；
+    // 小标题与链接导入的标题块同一个样子（几级照记号，网站版式按级别排、别的照序号判定）；列表、引用去掉记号成段。
+    const blocks = markdownFileBlocks(body);
+    const neutral = blocks.flatMap(block => {
+      if (block.k === 'title') return [];
+      if (block.k === 'h') {
+        const text = markdownPlainText(block.text);
+        return text ? [{ k: 'h', text, level: Math.min(Math.max(block.level, 2), 4), runs: [{ type: 'txt', text }] }] : [];
+      }
+      const image = block.k === 'p' && block.text.match(/^!\[[^\]]*\]\(([^)\s]+)[^)]*\)$/);
+      if (image) return [{ k: 'img', src: image[1], w: '100%' }];
+      return [{ k: 'txt', runs: parseMdRuns(block.text), text: block.text }];
+    });
     const elems = classifySeries(neutral, config);
     return {
       lines: render(elems, config),
       imgN: elems.filter(e => e.k === 'img').length,
       headingN: elems.filter(e => e.k === 'h1' || e.k === 'h2' || e.k === 'h3').length,
       authorName: extractSeriesAuthorName(elems),
-      title: (fm && fm.title) || '',
+      title: (fm && fm.title) || markdownFileTitle(blocks),
     };
   },
 

@@ -75,9 +75,9 @@ var layoutInputSpecs = []layoutInputSpec{
 	{layoutInputHTML, "文章 HTML", "html", layoutCarrierBlocks, "（网页上没有这一项，按抓到的网页正文排）", "原创",
 		"图片写公开的 https 绝对地址"},
 	{layoutInputMarkdown, "Markdown", "markdown", layoutCarrierMarkdown, "上传 .md 文件", "原创",
-		"图片用 ![](https://…) 写公开的绝对地址"},
+		"开头一行 # 标题 是文章标题，## 起是小标题，- 列表、> 引用照常写；图片用 ![](https://…) 写公开的绝对地址"},
 	{layoutInputText, "纯文本", "text", layoutCarrierText, "粘贴文字", "原创",
-		"没有图片链接时只排正文、不加页脚；有图片链接时按 Markdown 排"},
+		"没有图片链接时逐行排正文，页脚和网页上粘贴文字一样（FBIF食品饮料创新、Wow Food、什么是系列不加）；有图片链接时按 Markdown 排"},
 }
 
 func layoutInputSpecFor(kind layoutInputKind) layoutInputSpec {
@@ -412,7 +412,7 @@ func (a *layoutAPI) prepare(ctx context.Context, op *layoutOperation, req layout
 		if a.feishu == nil {
 			return layoutPrepared{}, newLayoutError(layoutErrFeishuUnavailable, "飞书导出没有接上")
 		}
-		doc, lerr := a.feishu.export(ctx, op.id, req.RequestID, req.Feishu)
+		doc, lerr := a.feishu.exportAs(ctx, op.id, req.RequestID, req.Feishu, req.FeishuAsPerson)
 		if lerr != nil {
 			return layoutPrepared{}, lerr
 		}
@@ -443,7 +443,8 @@ func (a *layoutAPI) prepare(ctx context.Context, op *layoutOperation, req layout
 		return layoutPrepared{Input: input, View: view}, nil
 	case layoutInputMarkdown:
 		input := emptyLayoutNodeInput(layoutCarrierMarkdown)
-		input.Text = req.Body
+		// FileName 只有智能体入口给（交接给编辑器的 .md 文件名，标题兜底和上传 .md 一样取它）；排版接口不给。
+		input.Text, input.FileName = req.Body, req.FileName
 		return layoutPrepared{Input: input, View: view}, nil
 	case layoutInputText:
 		input := emptyLayoutNodeInput(layoutCarrierText)
@@ -592,6 +593,8 @@ type layoutNodeResult struct {
 	Rule     layoutRuleJSON  `json:"rule"`
 	Build    string          `json:"build"`
 	Warnings json.RawMessage `json:"warnings"`
+	// Check 校对看的标题和正文纯文字（engine.js layoutArticleForCopy 的 checkTitle、checkText）。
+	Check articleCheckSource `json:"check"`
 }
 
 type layoutNodeClient struct {
