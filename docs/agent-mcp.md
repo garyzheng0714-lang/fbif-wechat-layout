@@ -12,8 +12,9 @@
 
 ```sh
 codex mcp add fbif-layout --url https://fbifmp-layout.foodtalks.cn/mcp
-codex mcp login fbif-layout
 ```
+
+加完会直接打开浏览器登录。以后要重新登录：`codex mcp login fbif-layout`。
 
 **Claude Code**
 
