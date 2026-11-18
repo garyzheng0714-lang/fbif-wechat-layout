@@ -155,6 +155,31 @@ test('ft-default：保留标题层级、正文富文本，并绑定图片与图�
   assert.equal(structuredResult.headingN, 3);
 });
 
+test('ft-default：原文的滑动图在网站上照旧一张张竖着排，图注里的「左右滑动查看」去掉（红线 50）', async () => {
+  const { html, imgN } = await renderArticle({
+    packId: 'ft-default',
+    title: '设计一个持续生长的超级食物品牌',
+    source: 'Design360',
+    blocks: [
+      { k: 'txt', runs: [{ type: 'txt', text: '品牌设计的逻辑亦由此生长。' }] },
+      { k: 'img', src: 'https://img.example.com/a1.jpg', dataW: '1080', swipe: 1 },
+      { k: 'img', src: 'https://img.example.com/a2.jpg', dataW: '1080', swipe: 1 },
+      { k: 'img', src: 'https://img.example.com/a3.jpg', dataW: '1080', swipe: 1 },
+      { k: 'cap', text: 'So Acai品牌视觉：以呈现超级食物本身为主' },
+      { k: 'cap', text: '←向左滑动查看更多' },
+      { k: 'txt', runs: [{ type: 'txt', text: '正文第二段。' }] },
+      { k: 'img', src: 'https://img.example.com/b1.jpg', dataW: '1080' },
+      { k: 'cap', text: '喜茶的周边（左右滑动查看）' },
+    ],
+  });
+  assert.equal(imgN, 4);
+  assert.doesNotMatch(html, /overflow-x/, '网站不排滑动图');
+  assert.equal((html.match(/<img [^>]*src="https:\/\/img\.example\.com\//g) || []).length, 4, '四张图都在、一张张排');
+  assert.match(html, /So Acai品牌视觉：以呈现超级食物本身为主/);
+  assert.match(html, /喜茶的周边</);
+  assert.doesNotMatch(html, /滑动查看/);
+});
+
 test('ft-default：原文单独一行的章节号「01」不进网站，下一行照常是小标题', async () => {
   const { html, headingN } = await renderArticle({
     packId: 'ft-default',

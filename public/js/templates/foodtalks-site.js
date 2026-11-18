@@ -22,6 +22,9 @@ const { applyFoodTalksBehavior, buildFooterHtml, compileSiteRegex, pickSiteTipSo
 // behOf/behTemplate/behParamStr/behList 共享实现收敛到 rule-behavior-utils.js（架构体检 S6）。
 const behaviorUtilsModule = await import('../rule-behavior-utils.js' + assetQuery);
 const { behOf, behTemplate, behParamStr, behList, headingOptsFromConfig } = behaviorUtilsModule;
+// 图注里的「左右滑动查看」：网站上图竖着排，去掉（红线 50；中性共享模块，公众号模板用它排滑动图）。
+const imageSwipeModule = await import('./shared/image-swipe.js' + assetQuery);
+const { withoutSwipeHints } = imageSwipeModule;
 function cfgNum(config, key, fallback) {
   const n = Number(config && config[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -681,7 +684,8 @@ function markSeriesAboutLogoImages(elems, config = {}) {
 
 // ---- 渲染主入口：把分类后的 elems 拼装成 HTML 行数组 ----
 
-function render(elems, config = {}) {
+function render(rawElems, config = {}) {
+  const elems = withoutSwipeHints(rawElems);
   const lines = [];
   let prevWasHeading = false;
   let prevWasStandaloneLink = false;

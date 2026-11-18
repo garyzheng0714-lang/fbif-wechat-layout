@@ -69,7 +69,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "一张图。紧跟在它后面的 cap 是这张图的说明",
+          "description": "一张图。紧跟在它后面的 cap 是这张图的说明；连着几张 swipe 号相同的图是原文一组滑动图，紧跟在最后一张后面的 cap 是这一组的说明",
           "properties": {
             "blankBefore": {
               "description": "原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管",
@@ -94,6 +94,10 @@
             "src": {
               "description": "图片或视频的原地址（公众号图床等），排版时换成转存后的地址",
               "type": "string"
+            },
+            "swipe": {
+              "description": "只在抓公众号原文时出现：这张图在原文一组左右滑着看的图（滑动图）里，同一组的图写同一个号，一篇里从 1 数起。公众号排成滑动图，FoodTalks、头条号、百家号不管，照旧一张张竖着排",
+              "type": "integer"
             }
           },
           "required": [

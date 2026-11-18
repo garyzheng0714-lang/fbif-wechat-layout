@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | `txt` | 段落 | 正文段落。所有字都加粗的段落是「整段加粗」，各渠道按加粗段写，不当小标题 | `runs` `text` `blankBefore` `compact` `tightBefore` |
 | `h` | 小标题 | 文中的小标题，级别看 level。文章标题不在块里，在块外面的 title | `text` `level` `blankBefore` |
-| `img` | 图片 | 一张图。紧跟在它后面的 cap 是这张图的说明 | `src` `dataW` `dataH` `dataRatio` `blankBefore` |
+| `img` | 图片 | 一张图。紧跟在它后面的 cap 是这张图的说明；连着几张 swipe 号相同的图是原文一组滑动图，紧跟在最后一张后面的 cap 是这一组的说明 | `src` `dataW` `dataH` `dataRatio` `swipe` `blankBefore` |
 | `cap` | 图注 | 图片下面的说明文字，或「图片来源：」「图源：」这类出处行，紧跟在 img 后面，可以连着好几条。两种不另设字段，靠文字开头区分。前面没有图时按普通段落 | `text` `blankBefore` |
 | `bq` | 引用 | 原文的引用块（blockquote） | `runs` `blankBefore` `tightBefore` |
 | `li` | 列表项 | 列表里的一项，连着的几项是同一个列表。原文是有序还是无序列表不区分 | `runs` `blankBefore` `tightBefore` |
@@ -29,6 +29,7 @@
 | `dataW` | 文字 | 图片原始宽度（像素，字符串），原文写了才有 |
 | `dataH` | 文字 | 图片原始高度（像素，字符串），原文写了才有 |
 | `dataRatio` | 文字 | 图片高宽比（字符串），原文写了才有 |
+| `swipe` | 整数 | 只在抓公众号原文时出现：这张图在原文一组左右滑着看的图（滑动图）里，同一组的图写同一个号，一篇里从 1 数起。公众号排成滑动图，FoodTalks、头条号、百家号不管，照旧一张张竖着排 |
 | `rows` | 行列表（每行是单元格列表） | 表格的行，每行是一串单元格 |
 | `poster` | 文字 | 视频封面图地址 |
 | `blankBefore` | 是/否 | 原文在这块前面有一个空段。公众号据此留出段距，FoodTalks 写成空段，头条号、百家号不管 |

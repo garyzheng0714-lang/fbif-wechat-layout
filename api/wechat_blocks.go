@@ -447,7 +447,10 @@ type blockWalker struct {
 	// spaceSinceLast 上一块之后原文留没留出竖向间距（段距、空格段、分隔线），见 wechat_spacing.go。
 	spaceSinceLast bool
 	// sideBySide 正在几层左右并排的容器里（flex、grid、表格排布），里面的段不算上下紧贴。
-	sideBySide   int
+	sideBySide int
+	// swipe 正在第几组滑动图的外框里（0 是不在），swipeGroups 这篇已经数到第几组，见 wechat_swipe.go。
+	swipe        int
+	swipeGroups  int
 	captionIndex *captionDOMIndex
 }
 
@@ -525,6 +528,7 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 				DataW:     firstNonEmpty(getAttr(n, "data-w"), getAttr(n, "width")),
 				DataH:     firstNonEmpty(getAttr(n, "data-h"), getAttr(n, "height")),
 				DataRatio: getAttr(n, "data-ratio"),
+				Swipe:     w.swipe,
 			})
 			return
 		case "video":
@@ -570,6 +574,12 @@ func (w *blockWalker) walk(n *html.Node, cur *blockCtx, inherited computedStyle)
 			italicStyle.Italic = true
 			w.walkChildren(n, cur, italicStyle)
 			return
+		}
+
+		if w.swipe == 0 && isImageSwipeBox(n) {
+			w.swipeGroups++
+			w.swipe = w.swipeGroups
+			defer func() { w.swipe = 0 }()
 		}
 
 		nodeStyle := parseInlineStyle(getAttr(n, "style"))

@@ -124,7 +124,7 @@ export function classifySeries(neutralElems, config = {}) {
     const plain = elemText(e).trim();
 
     // 图片：透传（保留 blankBefore 供间距判断）
-    if (e.k === 'img') { refMode = false; out.push({ k: 'img', src: e.src || '', w: e.w, aspect: e.aspect, blankBefore: e.blankBefore }); continue; }
+    if (e.k === 'img') { refMode = false; out.push({ k: 'img', src: e.src || '', w: e.w, aspect: e.aspect, blankBefore: e.blankBefore, ...(e.swipe ? { swipe: e.swipe } : {}) }); continue; }
     // 共享层已配对的图注
     if (e.k === 'cap') { out.push({ k: 'cap', text: e.text || '', runs: e.runs }); continue; }
     // 表格透传

@@ -42,11 +42,25 @@ var (
 	referenceHeaderRe = regexp.MustCompile(`^(参考来源|参考资料|参考文献|参考链接|资料来源)\s*[：:]?$`)
 	bareURLRe         = regexp.MustCompile(`https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+`)
 	// 公众号里几张图左右滑着看，图注带「（向左滑动查看更多）」；外发平台上图一张张竖着排，这句不对，去掉
-	// （#349 兼职在知乎号上手发时删了）。带括号的连括号去掉，不带的连前面的逗号、分号去掉。
-	swipeHintRe = regexp.MustCompile(`[（(]\s*` + swipeHint + `\s*[）)]|[，,；;]?\s*` + swipeHint)
+	// （#349 兼职在知乎号上手发时删了）。带括号的连括号去掉，不带的连前面的逗号、分号和箭头去掉。
+	// 网页那份（FoodTalks 网站去掉、公众号按它合成滑动图）在 public/js/templates/shared/image-swipe.js，
+	// 两边都用 testdata/swipe-hints.json 考。
+	swipeHintRe = regexp.MustCompile(`[（(【\[]\s*` + swipeArrows + swipeHint + swipeArrows + `\s*[）)】\]]|[，,；;]?\s*` +
+		swipeArrows + swipeHint + `(?:\s*` + swipeArrows + `)?`)
 )
 
-const swipeHint = `(?:请)?(?:向|往)?(?:左右|上下|[左右上下])?(?:滑动|滑)(?:屏幕)?(?:查看|看|浏览)(?:更多|全部|下一张)?(?:图片)?`
+// swipeHint 「左右滑动」「向左滑动查看更多」「左右滑动图片查看」「滑动查看下一张」「左滑查看」。单字的上、下
+// 要带「向」「往」才算（「销量下滑」「下滑动能」不是提示）。
+const swipeHint = `(?:请)?(?:(?:向|往)?(?:左右|上下|[左右])滑动(?:屏幕|图片)?(?:查看|浏览|看)?|(?:向|往)[上下]滑动(?:屏幕|图片)?(?:查看|浏览|看)?|` +
+	`滑动(?:屏幕|图片)?(?:查看|浏览|看)|(?:向|往)?(?:左右|[左右])滑(?:屏幕|图片)?(?:查看|浏览|看))(?:更多|全部|下一张|其他)?(?:图片|内容)?(?:查看)?`
+
+// swipeArrows 提示前后的箭头（「←向左滑动查看更多」「向左滑动 →」「👉左滑查看」）。
+const swipeArrows = `(?:[←→⇦⇨⬅➡👉👈◀▶«»＜＞<>]\x{FE0F}?\s*)*`
+
+// stripSwipeHint 去掉图注里的滑动提示，剩下的去掉两头的逗号、分号；整条都是提示的回空串。
+func stripSwipeHint(text string) string {
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(swipeHintRe.ReplaceAllString(text, "")), "；;，, "))
+}
 
 // distributionImageSize 读图片尺寸，只用于判断文末无图注的图是不是名片。测试可替换。
 var distributionImageSize = fetchImageSize
@@ -324,7 +338,7 @@ func uncaptionedImage(blocks []Block, i int) bool {
 func mergedCaption(blocks []Block) string {
 	caption := ""
 	for _, block := range blocks {
-		text := strings.Trim(strings.TrimSpace(swipeHintRe.ReplaceAllString(stripBareURLs(blockPlainText(block)), "")), "；;，, ")
+		text := stripSwipeHint(stripBareURLs(blockPlainText(block)))
 		if text == "" {
 			continue
 		}

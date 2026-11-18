@@ -20,6 +20,9 @@ const { classifyDocxArticle } = docxModelModule;
 const defaultsModule = await import('../foodtalks-series-defaults.js' + assetQuery);
 const { SERIES_COLORS, SERIES_SIZES, SERIES_LAYOUT, SERIES_FRONTMATTER } = defaultsModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
+// 滑动图（红线 50）：与 fbif 共用的中性模块。
+const imageSwipeModule = await import('./shared/image-swipe.js' + assetQuery);
+const { groupImageSwipes, renderImageSwipe } = imageSwipeModule;
 const { renderTable: renderSharedTable } = tableModule;
 // 底部统一区块模型：中性编排器 + 系列专属渲染器（红线#19：系列(公众号)渲染器独立，
 // 不 import mp-blocks/site-blocks；只 import 中性的 block-render 编排层与 asset-library 解析）。
@@ -99,19 +102,23 @@ function section(inner, opts) {
 // 图片块。width 取自 DOCX 原始百分比（如二维码 27%），缺省 100%（序号图/尾部名片等满列资源）；
 // 始终配 max-width:100% 防溢出，居中。沿用 fbif.js 口径（小图不拉满，与微信成品一致）。
 // line-height:0 防图下基线空隙。
-function imageSection(src, gap, sp, { alt = '', width = '100%' } = {}) {
+function imageTag(src, { alt = '', width = '100%' } = {}) {
   const url = absUrl(src);
   const isGif = looksLikeGifSource(url);
   const rpol = HTTP_RE.test(url) ? ' referrerpolicy="no-referrer"' : '';
   const gifAttr = isGif ? ' data-type="gif"' : '';
+  return `<img src="${escAttr(url)}"${gifAttr}${rpol} alt="${escAttr(alt)}" ` +
+    `style="width: ${width}; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;" />`;
+}
+
+function imageBox(inner, gap, sp) {
   const marginX = sp.imageMarginX ? `${sp.imageMarginX}px` : '0';
   const style = `margin: 0 ${marginX} ${gap ? sp.gap : 0}px; text-align: center; line-height: 0; font-size: 0;`;
-  return (
-    `<section style="${style}">` +
-    `<img src="${escAttr(url)}"${gifAttr}${rpol} alt="${escAttr(alt)}" ` +
-    `style="width: ${width}; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;" />` +
-    `</section>`
-  );
+  return `<section style="${style}">${inner}</section>`;
+}
+
+function imageSection(src, gap, sp, opts = {}) {
+  return imageBox(imageTag(src, opts), gap, sp);
 }
 
 const MORE_CARDS_WRAPPER_OPEN = '<section style="text-align: center;" data-card-inset="0">';
@@ -287,7 +294,7 @@ function isCompactDocxPair(a, b) {
 // ── 间距：默认每块后留 1 行空（gap）；紧凑成对例外不留 ──
 function gapAfter(e, next) {
   if (!next) return true;
-  if (e.k === 'img' && next.k === 'cap') return false;       // 图 → 图注紧贴
+  if ((e.k === 'img' || e.k === 'swipe') && next.k === 'cap') return false; // 图（滑动图）→ 图注紧贴
   if (e.k === 'cap' && next.k === 'cap') return false;       // 图注 → 图片来源紧贴
   if (e.k === 'ref-item' && next.k === 'ref-item') return false;
   if (e.k === 'rec-title') return false;                      // 段头紧贴首条
@@ -305,10 +312,12 @@ function gapAfter(e, next) {
 }
 
 // ── 渲染主入口 ──
-function render(elems, config = {}) {
+function render(rawElems, config = {}, { swipeByCaption = false } = {}) {
   const sp = styleProps(config);
   const lines = [];
   let headImageDone = false; // 首个正文图 = 头图（满宽）；其后按 aspect/DOCX 宽度
+  // 原文的滑动图（块的 swipe）合成一组；飞书、Word 稿按图注里的「左右滑动查看」认（红线 50）。
+  const elems = groupImageSwipes(rawElems, { byCaption: swipeByCaption });
 
   for (let i = 0; i < elems.length; i++) {
     const e = elems[i];
@@ -354,6 +363,11 @@ function render(elems, config = {}) {
         lines.push(imageSection(e.src, gap, sp, { width: seriesImageWidth(e, isHead, config) }));
         break;
       }
+      case 'swipe':
+        // 滑动图每格满格；排在开头也算头图。
+        headImageDone = true;
+        lines.push(imageBox(renderImageSwipe(e.items, item => imageTag(item.src)), gap, sp));
+        break;
       case 'cap':
         lines.push(section(
           span(e.text || runsToPlain(e.runs), { size: sp.capSize, color: sp.muted, sp }),
@@ -462,7 +476,7 @@ export default {
   processDocx({ paragraphs, imgCache, config: rawConfig = {} }) {
     const config = withRuleConfig(rawConfig);
     const { elems, imgN, headingN, authorName } = processDocxInternal(paragraphs, imgCache, config);
-    return { lines: render(elems, config), imgN, headingN, authorName };
+    return { lines: render(elems, config, { swipeByCaption: true }), imgN, headingN, authorName };
   },
 
   async processMd(text, opts = {}) {
@@ -488,7 +502,7 @@ export default {
     // URL 导入：把结构化块转成中性 elem（与 fbif 同口径），再走系列分类。
     const neutral = ((data && data.blocks) || []).map(b => {
       if (!b || !b.k) return null;
-      if (b.k === 'img') return { k: 'img', src: b.src || '', w: '100%' };
+      if (b.k === 'img') return { k: 'img', src: b.src || '', w: '100%', ...(b.swipe ? { swipe: b.swipe } : {}) };
       if (b.k === 'cap') return { k: 'cap', text: b.text || '' };
       if (b.k === 'table') return {
         k: 'table',

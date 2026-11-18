@@ -18,6 +18,9 @@ const headingDetectModule = await import('../heading-detect.js' + assetQuery);
 const { detectHeadingLevel, isBoldHeading, hasExplicitDocxHeadings, headingLevels } = headingDetectModule;
 const tableModule = await import('./shared/table-renderer.js' + assetQuery);
 const { renderTable: renderSharedTable } = tableModule;
+// 滑动图（红线 50）：中性共享模块，系列模板也用，不跨渲染器 import。
+const imageSwipeModule = await import('./shared/image-swipe.js' + assetQuery);
+const { groupImageSwipes, renderImageSwipe } = imageSwipeModule;
 // 底部追加式区块（统一模型）：中性编排器 + 公众号渲染器（红线 #19：不 import 网站渲染器）。
 const blockRenderModule = await import('../blocks/block-render.js' + assetQuery);
 const { renderBottomBlocksHtml } = blockRenderModule;
@@ -282,7 +285,7 @@ function shouldSpaceAfter(e, next) {
   if (next.k === 'cap') return false;
   if (e.k === 'ref' && next.k === 'ref') return false;
   if (e.k === 'attr' && next.k === 'attr') return false;
-  if (e.k === 'img' && (next.k === 'cap' || next.k === 'img')) return false;
+  if ((e.k === 'img' || e.k === 'swipe') && (next.k === 'cap' || next.k === 'img' || next.k === 'swipe')) return false;
   if (isCompactDocxPair(e, next)) return false;
   return true;
 }
@@ -548,16 +551,25 @@ function renderTopAttributionLines(author, source, opts, context, behavior) {
   return lines;
 }
 
-function renderImageElement(elem, spaceAfter) {
+function imageTag(elem, width) {
   const src = elem.src || '';
   const isGif = elem.gif || looksLikeGifSource(src);
   const referrerPolicy = src.startsWith('http') ? ' referrerpolicy="no-referrer"' : '';
   const gifAttr = isGif ? ' data-type="gif"' : '';
-  const sizeStyle = elem.maxPx
+  const sizeStyle = elem.maxPx && !width
     ? 'max-width: ' + elem.maxPx + 'px; width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;'
-    : 'width: ' + elem.w + '; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;';
-  return '<section class="' + sectionClass('wx-pi' + elemExtraClass(elem), spaceAfter) + '">' +
-    '<img src="' + escAttr(src) + '"' + gifAttr + referrerPolicy + ' style="' + sizeStyle + '" /></section>';
+    : 'width: ' + (width || elem.w) + '; max-width: 100%; height: auto; display: block; margin: 0 auto; vertical-align: top;';
+  return '<img src="' + escAttr(src) + '"' + gifAttr + referrerPolicy + ' style="' + sizeStyle + '" />';
+}
+
+function renderImageElement(elem, spaceAfter) {
+  return '<section class="' + sectionClass('wx-pi' + elemExtraClass(elem), spaceAfter) + '">' + imageTag(elem) + '</section>';
+}
+
+// 滑动图：外层与单张图同一个 wx-pi（左右缩进、行高 0），里面每格图满格。
+function renderSwipeElement(elem, spaceAfter) {
+  return '<section class="' + sectionClass('wx-pi', spaceAfter) + '">' +
+    renderImageSwipe(elem.items, item => imageTag(item, '100%')) + '</section>';
 }
 
 function renderTableElement(elem, spaceAfter) {
@@ -575,6 +587,8 @@ function renderElement(elem, spaceAfter, context, behavior) {
         esc(localizePunct(elem.text)) + '</span>'), spaceAfter);
     case 'img':
       return renderImageElement(elem, spaceAfter);
+    case 'swipe':
+      return renderSwipeElement(elem, spaceAfter);
     case 'cap':
       return secCenter(leafWrap('<span textstyle="" class="wx-tc">' + esc(localizePunct(elem.text)) + '</span>'), spaceAfter);
     case 'txt':
@@ -601,10 +615,12 @@ function renderElement(elem, spaceAfter, context, behavior) {
 function render(elems, author, source, opts) {
   const prepared = prepareRenderState(elems, author, source, opts);
   const lines = renderTopAttributionLines(author, source, opts, prepared.context, prepared.behavior);
+  // 原文的滑动图（块的 swipe）合成一组；飞书、Word、Markdown 稿按图注里的「左右滑动查看」认。
+  const body = groupImageSwipes(prepared.elems, { byCaption: !!opts?.swipeByCaption });
 
-  for (let index = 0; index < prepared.elems.length; index++) {
-    const elem = prepared.elems[index];
-    const next = index + 1 < prepared.elems.length ? prepared.elems[index + 1] : null;
+  for (let index = 0; index < body.length; index++) {
+    const elem = body[index];
+    const next = index + 1 < body.length ? body[index + 1] : null;
     const line = renderElement(elem, shouldSpaceAfter(elem, next), prepared.context, prepared.behavior);
     if (line) lines.push(line);
   }
@@ -648,7 +664,7 @@ function takeStructuralBlock(state, block) {
       const src = typeof block.src === 'string' ? block.src : '';
       state.imgN++;
       state.inRef = false;
-      state.elems.push({ k: 'img', src, w: '100%', maxPx, gif: looksLikeGifSource(src) });
+      state.elems.push({ k: 'img', src, w: '100%', maxPx, gif: looksLikeGifSource(src), ...(block.swipe ? { swipe: block.swipe } : {}) });
       return true;
     }
     case 'cap': {
@@ -780,7 +796,7 @@ export default {
     // config 当前不消费 —— 仅为接口兼容，不破坏公众号现有行为
     const { elems, author, imgN } = classifyDocx(paragraphs, imgCache);
     return {
-      lines: render(elems, author, '', { isRepost, articleArtifactOverride, articleFooterProfileOverride }),
+      lines: render(elems, author, '', { isRepost, articleArtifactOverride, articleFooterProfileOverride, swipeByCaption: true }),
       imgN,
       headingN: elems.filter(e => e.k === 'h').length,
       articleMeta: articleMeta(author, ''),
@@ -791,7 +807,7 @@ export default {
     // opts 已含 articleArtifactOverride / articleFooterProfileOverride，透传 render。
     const { elems, author, source, title, imgN } = await classifyMd(text);
     return {
-      lines: render(elems, author, source, opts),
+      lines: render(elems, author, source, { ...opts, swipeByCaption: true }),
       imgN,
       headingN: elems.filter(e => e.k === 'h').length,
       title,
