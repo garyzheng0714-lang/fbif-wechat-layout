@@ -2,7 +2,7 @@
 
 硬约束见 [索引](docs/INDEX.md)；违规不可发布。
 
-本文件每条只写一句现行边界，以它为准；「细则 §X」指 [docs/redlines.md](docs/redlines.md) 的同名小节（完整做法、守护测试），用户原话与事故经过在 [docs/adr/2026-10-20-rulings-backstory.md](docs/adr/2026-10-20-rulings-backstory.md)。新规矩照此写：一句边界进本文件，做法进细则，原话进来历；本文件超过 1.5 万字或 200 行，规则守卫会拦。
+> 以本文件为准；「细则 §X」指 [docs/redlines.md](docs/redlines.md) 的同名小节（完整做法、守护测试），用户原话与事故经过在 [docs/adr/2026-10-20-rulings-backstory.md](docs/adr/2026-10-20-rulings-backstory.md)。
 
 ## 平台与叫法（2026-10-14 用户裁定）
 
