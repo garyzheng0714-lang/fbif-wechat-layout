@@ -56,6 +56,7 @@
 ## 历史材料
 
 - [规则裁定的来龙去脉](adr/2026-10-20-rulings-backstory.md)：CLAUDE.md 各条裁定当时的用户原话、核对数据和事故经过（2026-10-20 从 CLAUDE.md 挪出）；现行规则以 CLAUDE.md 为准。
+- [红线细则](redlines.md)：CLAUDE.md 每条红线的完整做法与守护测试（2026-11-19 从 CLAUDE.md 原样挪出）；边界以 CLAUDE.md 为准。
 - [2026-08-14 排版事故批次快照](agents/baselines/broken-layout-batch-2026-08-14/HANDOFF.md)：改前证据与当时批次口径。图宽、目录、标签能力后来已有部分改动，但表格、图题、小标题与 CMS 清洗尚无整批闭环证据；CMS 手工稿不得被库存批量覆盖。
 - [`docs/worklogs/`](worklogs/) 保存问题排查、验收和交接记录，不是当前规则；是否仍在推进，要同时看文件顶部状态、当前工作区、issue tracker 和代码证据。
 - `openspec/changes/` 保存设计演进、事故复盘和任务记录；稳定能力以 `openspec/specs/` 为准。
