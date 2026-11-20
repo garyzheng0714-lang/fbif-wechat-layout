@@ -361,7 +361,7 @@ curl http://127.0.0.1:9000/api/health
 | `AUTH_SESSION_SECRET` | 未上架预览页、外发改稿页签名用的密钥（派生独立子密钥）；不再用于登录 |
 | `AUTH_USERS_PATH` | 本项目用户库（角色、停用）JSON；默认与规则存储同目录，飞书授权（`feishu-grants.json`）放在同一目录；本项目不存登录会话 |
 | `SSO_TOKEN_KEY` | 飞书授权（`api/internal/feishugrant`）封存令牌的钥匙，中台下发；沿用原来登录模板那把，换了已授权的人都要重新授权 |
-| `SSO_HUB_URL` / `SSO_HUB_KEY` / `SSO_RECONCILE_SECONDS` | 智能体每次调用查的停用名单（`api/agent_blocklist.go`）：问中台 `SSO_HUB_URL/sso/blocklist`（部署写 `http://127.0.0.1:13199/hub-auth/layout`），钥匙 `SSO_HUB_KEY` 中台下发；每 `SSO_RECONCILE_SECONDS` 拉一轮（默认 6 小时，10 分钟到 24 小时），从没拉到过智能体一律不放。浏览器那边只看入口给的 `X-FBIF-User` |
+| `SSO_HUB_URL` / `SSO_HUB_KEY` / `SSO_RECONCILE_SECONDS` | 智能体每次调用查的停用名单（`api/agent_blocklist.go`）：问中台 `SSO_HUB_URL/sso/blocklist`（部署写 `http://127.0.0.1:13199/hub-auth/layout`），钥匙 `SSO_HUB_KEY` 中台下发；每 `SSO_RECONCILE_SECONDS` 拉一轮（默认 6 小时，10 分钟到 24 小时），集成平台发来名单提醒 `POST /internal/auth/blocklist-changed` 就马上拉，从没拉到过智能体一律不放。浏览器那边只看入口给的 `X-FBIF-User` |
 | `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 本项目的飞书应用：本人授权飞书（读云文档、列群）与回调 `/auth/feishu/fbif/qr-callback`；生产必须完整配置，飞书应用「安全设置 → 重定向 URL」里要有 `https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback`（2026-11-10 统一登录上线时补上，缺了授权回不来） |
 | `FEISHU_LOGIN_SCOPES` | 可选，覆盖授权飞书时要的权限（`offline_access` 会自动加上） |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |

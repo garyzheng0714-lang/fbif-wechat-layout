@@ -7,7 +7,7 @@
 #
 # 登录由入口统一拦截（FBIF 统一登录 v5，2026-11-20 起）：最后一行 import fbif_login，每个请求先问登录中心，
 # 登了把「这是谁」写进 X-FBIF-User 交给 Go 9001；没登录的页面由中心跳去登录，接口回 401；
-# /auth/*、/api/me 由入口直接转给中心。本项目不写登录代码（api/auth_login.go 只读这个头）。
+# /auth/*、/internal/auth/*（停用名单提醒除外）、/api/me 由入口直接转给中心。本项目不写登录代码（api/auth_login.go 只读这个头）。
 # 写在 import 前面的 handle 不过登录（handle 按写的顺序先匹配），一律删掉浏览器带来的 X-FBIF-User。
 #
 # /api 全部交给 Go 9001，未知 API 由 Go 统一返回 JSON 404，不落到静态文件形成 HTML 假 200。
@@ -53,6 +53,17 @@ fbifmp-layout.foodtalks.cn {
 				write_timeout 180s
 			}
 		}
+	}
+
+	# 集成平台的停用名单提醒（名单一变就发，只说变了、不要钥匙）：只这一条交给 Go，智能体的名单马上去中台拉
+	# （api/agent_blocklist.go）。别的 /internal/auth/* 照旧由入口片段交给登录中心。
+	@fbifBlocklistChanged {
+		method POST
+		path /internal/auth/blocklist-changed
+	}
+	handle @fbifBlocklistChanged {
+		request_header -X-FBIF-User
+		reverse_proxy 127.0.0.1:9001
 	}
 
 	# 人和程序都调的接口：带了程序钥匙的（监控端 X-Publish-Sync-Token、运维 X-Publish-Admin-Token、

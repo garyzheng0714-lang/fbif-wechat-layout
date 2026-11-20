@@ -128,6 +128,10 @@ test('入口：页面和接口过登录，别的程序的路径不过且收不�
     assert.equal((await get(path)).body, `center:${path}`);
   }
   assert.equal((await get('/internal/auth/health')).status, 404);
+  // 停用名单提醒：POST 这一条进 Go（冒充的头删掉），别的 /internal/auth/* 和 GET 照旧给登录中心。
+  atApp(await get('/internal/auth/blocklist-changed', { method: 'POST' }), null);
+  assert.equal((await get('/internal/auth/blocklist-changed')).body, 'center:/internal/auth/blocklist-changed');
+  assert.equal((await get('/internal/auth/accounts-changed', { method: 'POST' })).body, 'center:/internal/auth/accounts-changed');
   // 静态文件照旧公开（审核预览页、飞书侧边栏要用）。
   assert.equal((await get('/js/a.js', { forged: false })).body, 'js');
   assert.equal((await get('/distribute.html', { forged: false })).body, 'DIST');

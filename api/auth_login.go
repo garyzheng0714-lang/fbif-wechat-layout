@@ -156,10 +156,11 @@ func (s *authService) Register(mux *http.ServeMux) {
 		s.grants.Register(mux, s.requireLogin)
 	}
 	mux.HandleFunc("GET /api/auth/me", noStoreHandler(s.handleCurrentUser))
+	mux.HandleFunc("POST /internal/auth/blocklist-changed", s.handleBlocklistChanged)
 }
 
 // programPathPrefixes 是不过登录的路径：别的程序调的（健康检查、监控端交稿和告警、飞书卡片回调、排版接口、程序化排版、
-// 智能体的 MCP 和换令牌、传 Word），各用自己的钥匙或签名；带签名的审核预览页；按内容哈希取的图片缓存（上传服务、
+// 智能体的 MCP 和换令牌、传 Word），各用自己的钥匙或签名；集成平台的停用名单提醒（只叫这里去问中台，不要钥匙）；带签名的审核预览页；按内容哈希取的图片缓存（上传服务、
 // 微信后台不带登录也要取得到，和以前一样公开）。入口不拦，这里也不认请求头上的人（浏览器自己带的 X-FBIF-User 删掉）。
 // 和 deploy/caddy/fbifmp-layout.caddy 的 @program 是同一张单子（tests/deploy-transaction.test.mjs 核对）。
 // 授权页 /oauth/authorize 是人在浏览器里点的，要登录，不在这里。
@@ -180,6 +181,7 @@ var programPathPrefixes = []string{
 	"/.well-known/oauth-",
 	"/preview/",
 	"/api/doc-cache/",
+	"/internal/auth/blocklist-changed",
 }
 
 func programPath(path string) bool {

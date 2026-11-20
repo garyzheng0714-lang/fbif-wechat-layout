@@ -365,7 +365,7 @@ test('Caddy puts the login gateway last, program paths before it strip X-FBIF-Us
 
   // 每个写在 import 前的 handle 都先删掉浏览器带来的 X-FBIF-User（静态文件不进 Go，不用删）。
   const handles = [...directives.matchAll(/^\thandle @(\w+) \{\n([\s\S]*?)\n\t\}/gm)];
-  assert.deepEqual(handles.map(h => h[1]), ['fbifProgram', 'fbifProgramKey', 'fbifFeishuGrant', 'fbifStatic']);
+  assert.deepEqual(handles.map(h => h[1]), ['fbifProgram', 'fbifBlocklistChanged', 'fbifProgramKey', 'fbifFeishuGrant', 'fbifStatic']);
   for (const [, name, inner] of handles) {
     if (name === 'fbifStatic') {
       assert.doesNotMatch(inner, /reverse_proxy/);
@@ -381,12 +381,16 @@ test('Caddy puts the login gateway last, program paths before it strip X-FBIF-Us
   // 必须包在 route 里按写的顺序跑：handle 里 forward_auth 排在 request_header 前，先删头会把中心给的人也删掉（2026-11-20 本机实测）。
   assert.match(grant, /^\t\troute \{\n\t\t\trequest_header -X-FBIF-User\n\t\t\tforward_auth 127\.0\.0\.1:19160 \{\n\t\t\t\turi \/_fbif\/verify\n\t\t\t\theader_up X-FBIF-Verify caddy\n\t\t\t\tcopy_headers X-FBIF-User/);
 
+  // 停用名单提醒只把 POST 这一条交给 Go，别的 /internal/auth/* 照旧给登录中心。
+  assert.match(directives, /@fbifBlocklistChanged \{\n\t\tmethod POST\n\t\tpath \/internal\/auth\/blocklist-changed\n\t\}\n/);
+
   // 编辑器页面不能当静态文件不过登录发出去。
   assert.match(directives, /not path \/ \/index\.html \/app\.html \/site\.html\n/);
 
   // 不过登录的路径和 Go 的 programPathPrefixes 是同一张单子。
   const caddyProgram = directives.match(/@fbifProgram path (.+)\n/)[1].trim().split(/\s+/)
-    .map(p => p.endsWith('/*') ? p.slice(0, -1) : p.endsWith('*') ? p.slice(0, -1) : p);
+    .map(p => p.endsWith('/*') ? p.slice(0, -1) : p.endsWith('*') ? p.slice(0, -1) : p)
+    .concat('/internal/auth/blocklist-changed');
   const goSource = await projectFile('api/auth_login.go');
   const goList = goSource.match(/var programPathPrefixes = \[\]string\{([\s\S]*?)\n\}/)[1];
   const goProgram = [...goList.matchAll(/"([^"]+)"/g)].map(m => m[1]);

@@ -51,9 +51,12 @@ test('本项目没有登录页：登录页只在登录中心，旧的登录页�
 
 test('登录、退出、登录健康都归入口和登录中心，站点不再把 /auth/* 转给 Go（飞书授权两条除外）', () => {
   assert.match(caddy, /^\timport fbif_login 127\.0\.0\.1:9001$/m);
-  assert.doesNotMatch(caddy, /@fbifAuth|@fbifLoginHealth|\/auth\/center|backchannel-logout|\/internal\/auth/);
+  assert.doesNotMatch(caddy, /@fbifAuth|@fbifLoginHealth|\/auth\/center|backchannel-logout/);
   const directives = caddy.split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
-  const authPaths = [...directives.matchAll(/\/auth\/[\w\/-]*/g)].map(m => m[0]);
+  // /internal/auth/* 只有停用名单提醒这一条交给 Go（智能体的名单马上拉），别的归登录中心。
+  const internalPaths = [...directives.matchAll(/\/internal\/auth\/[\w\/-]*/g)].map(m => m[0]);
+  assert.deepEqual([...new Set(internalPaths)], ['/internal/auth/blocklist-changed']);
+  const authPaths = [...directives.replaceAll('/internal/auth/', '').matchAll(/\/auth\/[\w\/-]*/g)].map(m => m[0]);
   assert.deepEqual([...new Set(authPaths)].sort(), ['/auth/feishu-grant', '/auth/feishu/fbif/qr-callback']);
   assert.doesNotMatch(caddy, /login\.html|auth-callback|\/auth\/password/);
 });
