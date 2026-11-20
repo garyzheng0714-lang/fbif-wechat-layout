@@ -165,6 +165,8 @@ type externalLaneOutlook struct {
 	Login  externalLoginWait
 	// Retrying 系统还会自己重推、先不算失败：前几次退避没用完，或号刚登好。
 	Retrying bool
+	// Manual 这条 lane 的号现在是「人工发」：系统不推了，归人去发（publish_external_manual.go）。
+	Manual bool
 }
 
 func externalLaneOutlookOf(job publishJob, lane publishExternalLane, now time.Time) externalLaneOutlook {
@@ -174,7 +176,8 @@ func externalLaneOutlookOf(job publishJob, lane publishExternalLane, now time.Ti
 	}
 	target, ok := cfg.jobTarget(job, lane.AccountID)
 	if !ok {
-		return externalLaneOutlook{}
+		_, manual := cfg.account(lane.AccountID)
+		return externalLaneOutlook{Manual: manual}
 	}
 	out := externalLaneOutlook{Target: target, Found: true, Login: externalLaneLogin(lane, target, now)}
 	if out.Login == externalLoginNone && lane.AutoRetries >= len(externalAutoRetryDelays) {

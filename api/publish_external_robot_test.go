@@ -33,6 +33,16 @@ type fakeDistributionRobot struct {
 	unpublishes     []string // 平台/键/actor
 	unpublishRecord *robotDraftRecord
 	unpublishErr    error
+
+	publicAsks     []string // 平台/主页
+	publicArticles []externalArticleRef
+	publicErr      error
+}
+
+// PublicArticles 回事先放好的公开文章（人工发的号查链接用）。
+func (f *fakeDistributionRobot) PublicArticles(_ context.Context, platform, homepage string) ([]externalArticleRef, error) {
+	f.publicAsks = append(f.publicAsks, platform+"/"+homepage)
+	return f.publicArticles, f.publicErr
 }
 
 func (f *fakeDistributionRobot) SaveDraft(_ context.Context, platform string, req robotDraftRequest) (robotDraftRecord, error) {

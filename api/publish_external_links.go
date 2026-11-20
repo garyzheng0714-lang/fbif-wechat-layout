@@ -6,6 +6,8 @@ package main
 // 发的），自动外发不会再推。登记时不给链接可以按标题找：
 //   - 头条号：头条搜索按标题拿候选（文章 id 高 32 位是发文时间，先按时间筛），再用
 //     TikHub 读文章详情，作者是自家号、标题对得上才认；
+//   - 平台能读公开文章的（分发服务 public_articles，现在是腾讯号）：按号的「主页」经分发服务读公开列表（publish_external_manual.go），
+//     号是「人工发」的系统也自己按它找；
 //   - 百家号：百度搜索有验证码，不绕过，不自动找。
 
 import (
@@ -54,13 +56,24 @@ var lookupToutiaoArticle = defaultLookupToutiaoArticle
 
 // lookupExternalArticle 人工登记已发时按标题找文章链接；平台不支持自动找时报错。
 // 遗留（分发框架第 4 步后）：按平台编号写在排版工具里，因为要用 A 机上的 TikHub 密钥；以后挪进分发服务的平台文件。
-func lookupExternalArticle(ctx context.Context, profile distributionPlatform, title string, from, to time.Time) (externalArticleRef, error) {
-	switch profile.Key {
-	case toutiaoPlatformKey:
+func (p *publishPipeline) lookupExternalArticle(ctx context.Context, target externalAccount, title string, from, to time.Time) (externalArticleRef, error) {
+	profile := platformForAccount(target)
+	if profile.Key == toutiaoPlatformKey {
 		return lookupToutiaoArticle(ctx, title, from, to)
-	default:
+	}
+	if !externalManualTrackable(target) {
 		return externalArticleRef{}, fmt.Errorf("%s暂不支持自动查找文章链接，请直接提供链接", profile.Name)
 	}
+	articles, err := p.externalPublicArticles(ctx, target)
+	if err != nil {
+		return externalArticleRef{}, err
+	}
+	for _, article := range articles {
+		if !article.PublishedAt.Before(from) && !article.PublishedAt.After(to) && externalTitlesMatch(title, article.Title) {
+			return article, nil
+		}
+	}
+	return externalArticleRef{}, errExternalArticleNotFound
 }
 
 var toutiaoGroupIDRe = regexp.MustCompile(`toutiao\.com/(?:a|article/|group/)(\d{16,20})`)
@@ -265,7 +278,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	if err != nil {
 		return result, err
 	}
-	target, ok := cfg.target(result.AccountID)
+	target, ok := cfg.account(result.AccountID)
 	if !ok {
 		return result, errors.New("account_id 不是已配置的外发账号")
 	}
@@ -291,7 +304,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 		}
 	case req.Lookup:
 		from, to := externalLaneLookupWindow(job, existing, pipelineNow(p))
-		ref, err := lookupExternalArticle(ctx, profile, firstNonEmpty(title, existing.Title, job.Title), from, to)
+		ref, err := p.lookupExternalArticle(ctx, target, firstNonEmpty(title, existing.Title, job.Title), from, to)
 		if err != nil {
 			return result, err
 		}
@@ -306,20 +319,7 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 	if settled {
 		result.Action = "set_link"
 	}
-	stamp := pipelineNow(p).Format(time.RFC3339)
-	apply := func(lane *publishExternalLane) {
-		if !settled {
-			lane.State = publishExternalLaneManual
-			lane.RequestedBy, lane.RequestedAt, lane.CompletedAt = publishExternalManualActor, stamp, stamp
-			lane.Error = ""
-		}
-		if articleURL != "" {
-			lane.URL = articleURL
-		}
-		if title != "" {
-			lane.Title = title
-		}
-	}
+	apply := externalManualApply(settled, publishExternalManualActor, pipelineNow(p).Format(time.RFC3339), articleURL, title)
 	if req.DryRun {
 		preview := existing
 		if !exists {
@@ -329,33 +329,11 @@ func (p *publishPipeline) registerExternalDistributionManual(ctx context.Context
 		result.Lane = preview
 		return result, nil
 	}
-	updated, swapped, err := p.store.updateIf(jobID, func(current publishJob) bool {
-		lane, ok := externalLaneFor(current, target.ID)
-		if ok != exists {
-			return false
-		}
-		return !ok || (lane.State == existing.State && lane.ContentPK == existing.ContentPK)
-	}, func(current *publishJob) {
-		i := externalLaneIndex(*current, target.ID)
-		if i < 0 {
-			current.ExternalDistributionLanes = append(current.ExternalDistributionLanes, publishExternalLane{AccountID: target.ID, Name: target.label()})
-			i = len(current.ExternalDistributionLanes) - 1
-		}
-		apply(&current.ExternalDistributionLanes[i])
-		if current.ExternalDistributionAutoPending != "" && len(externalDistributionMissingAutoTargets(*current, cfg)) == 0 {
-			current.ExternalDistributionAutoPending = ""
-			current.ExternalDistributionAutoError = ""
-		}
-		enqueueExternalDistributionCardUpdate(current)
-	})
+	updated, err := p.saveExternalManualLane(jobID, cfg, target, existing, exists, apply)
 	if err != nil {
 		return result, err
 	}
-	if !swapped {
-		return result, fmt.Errorf("%s的状态刚刚变化，请重新读取后再登记", target.label())
-	}
 	result.Lane, _ = externalLaneFor(updated, target.ID)
 	result.Lane.PayloadJSON = ""
-	p.scheduleExternalDistributionCardUpdate(updated.ID)
 	return result, nil
 }

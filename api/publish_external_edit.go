@@ -90,7 +90,12 @@ type externalPlatformState struct {
 }
 
 func externalPlatformStatus(job publishJob, target externalAccount) externalPlatformState {
-	if lane, ok := externalLaneFor(job, target.ID); ok {
+	lane, ok := externalLaneFor(job, target.ID)
+	if target.manual() && !(ok && externalLaneSettled(lane)) {
+		// 人工发的号还没在平台上查到这篇（publish_external_manual.go）：没有按钮，也不算失败。
+		return externalPlatformState{Status: "待人工发", Tone: "grey"}
+	}
+	if ok {
 		state := externalPlatformState{URL: reviewCardSafeURL(lane.URL), Title: strings.TrimSpace(lane.Title)}
 		switch {
 		case lane.State == publishExternalLaneManual:

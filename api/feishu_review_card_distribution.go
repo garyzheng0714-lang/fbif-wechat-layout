@@ -44,7 +44,7 @@ func reviewCardDistributionElements(jobs []publishJob, allowStart, aggregate boo
 	heading := aggregate && len(jobs) > 1
 	var body []any
 	for _, job := range jobs {
-		body = append(body, reviewCardDistributionGroup(job, cfg.forJob(job), allowStart, aggregate, heading, icons, compact)...)
+		body = append(body, reviewCardDistributionGroup(job, cfg.forJob(job), cfg.manualForJob(job), allowStart, aggregate, heading, icons, compact)...)
 	}
 	if len(body) == 0 {
 		return nil
@@ -59,7 +59,8 @@ func reviewCardExternalDistributionElements(job publishJob, allowStart bool) []a
 	return reviewCardDistributionElements([]publishJob{job}, allowStart, false, nil, false)
 }
 
-func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allowStart, aggregate, heading bool, icons reviewCardIcons, compact bool) []any {
+// manual 是「人工发」的号（publish_external_manual.go）：只显示，不给按钮；等人发、发了查得到的，或已经发布了的才列。
+func reviewCardDistributionGroup(job publishJob, targets, manual []externalAccount, allowStart, aggregate, heading bool, icons reviewCardIcons, compact bool) []any {
 	started := externalDistributionStarted(job)
 	switch {
 	case job.Stage == publishStagePublished:
@@ -86,7 +87,7 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 			"content": "<font color='grey'>" + reviewCardSafeText(message, 180) + "</font>",
 		}}
 	}
-	if !started && (!allowStart || len(targets) == 0) {
+	if !started && (!allowStart || len(targets)+len(manual) == 0) {
 		// 没开始分发、又不能从这张卡发起（进度卡、缺配置）：不渲染一个必失败的入口。
 		return nil
 	}
@@ -106,6 +107,13 @@ func reviewCardDistributionGroup(job publishJob, targets []externalAccount, allo
 		line, lineFixing := row(job, target, true, canStart, icons)
 		rows = append(rows, line)
 		fixing = fixing || lineFixing
+	}
+	for _, target := range manual {
+		seen[strings.TrimSpace(target.ID)] = true
+		if externalManualShown(job, target, externalCardNow()) {
+			line, _ := row(job, target, false, false, icons)
+			rows = append(rows, line)
+		}
 	}
 	for _, lane := range job.ExternalDistributionLanes {
 		if seen[strings.TrimSpace(lane.AccountID)] {

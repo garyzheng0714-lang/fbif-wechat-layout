@@ -82,7 +82,7 @@ func TestHubBundleFeedAsksWithETagAndWait(t *testing.T) {
 	}{
 		{hubAnswerBody(http.StatusOK, `{"version":3,"items":{"platform_accounts":[
 			{"code":"recToutiao","platform_code":"toutiao","carrier":"article","display_name":"头条号 · FBIF","status":"在用","source_wechat_account":"FBIF食品饮料创新","notify_chat":"oc_1","auto_distribute":false,
-			 "server_login_status":"要登录","checked_at":"2026-11-20T06:43:12.345Z"},
+			 "server_login_status":"要登录","checked_at":"2026-11-20T06:43:12.345Z","homepage_url":" https://www.toutiao.com/c/user/1/ "},
 			{"code":"recDouyin","platform_code":"douyin","carrier":"post","display_name":"抖音 · FBIF食品创新展","status":"在用","source_wechat_account":"FBIF食品创新展","notify_chat":"oc_2","auto_distribute":true}]},"warnings":[]}`,
 			"ETag", `"layout-v3"`), hubWaiting},
 		{hubAnswer(http.StatusNotModified), hubAnswered},
@@ -118,6 +118,10 @@ func TestHubBundleFeedAsksWithETagAndWait(t *testing.T) {
 	if got := changes[0].accounts; got[0].Login != "要登录" || !got[0].LoginCheckedAt.Equal(time.Date(2026, 11, 20, 6, 43, 12, 345e6, time.UTC)) ||
 		got[1].Login != "" || !got[1].LoginCheckedAt.IsZero() {
 		t.Fatalf("登录状态对到账号上：%+v", got)
+	}
+	// 「主页」给人工发的号查人发了哪篇（publish_external_manual.go）；前后空白去掉，没送的是空。
+	if got := changes[0].accounts; got[0].Homepage != "https://www.toutiao.com/c/user/1/" || got[1].Homepage != "" {
+		t.Fatalf("主页对到账号上：%+v", got)
 	}
 	if strings.Contains(fmt.Sprint(client), key) {
 		t.Fatal("打印客户端不许露出钥匙")

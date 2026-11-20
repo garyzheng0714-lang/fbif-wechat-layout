@@ -71,6 +71,8 @@ type jobIntervals struct {
 	distributionFollow time.Duration // 分发进度跟进
 	editReportCheck    time.Duration // 编辑周报检查
 	platformsFallback  time.Duration // 平台限制兜底
+	manualLookup       time.Duration // 人工发的号查链接
+	manualLookupWindow dayWindow     // 人工发的号查链接的时段
 }
 
 var defaultJobIntervals = jobIntervals{
@@ -81,6 +83,8 @@ var defaultJobIntervals = jobIntervals{
 	distributionFollow: time.Minute,
 	editReportCheck:    30 * time.Minute,
 	platformsFallback:  6 * time.Hour,
+	manualLookup:       30 * time.Minute,
+	manualLookupWindow: dayWindow{9 * 60, 21 * 60},
 }
 
 // intervals 进程里实际用的间隔：main 在起任何循环之前用 loadJobIntervals 换上一次，之后只读。
@@ -104,21 +108,27 @@ func secondsVar(env string, into *time.Duration) intervalVar {
 	}, func() string { return strconv.Itoa(int(into.Seconds())) }}
 }
 
+func windowVar(env string, into *dayWindow) intervalVar {
+	return intervalVar{env, func(raw string) bool {
+		w, ok := parseDayWindow(raw)
+		if ok {
+			*into = w
+		}
+		return ok
+	}, func() string { return into.String() }}
+}
+
 func (s *jobIntervals) vars() []intervalVar {
 	return []intervalVar{
-		{"CMS_RECONCILE_PEAK_WINDOW", func(raw string) bool {
-			w, ok := parseDayWindow(raw)
-			if ok {
-				s.cmsPeakWindow = w
-			}
-			return ok
-		}, func() string { return s.cmsPeakWindow.String() }},
+		windowVar("CMS_RECONCILE_PEAK_WINDOW", &s.cmsPeakWindow),
 		secondsVar("CMS_RECONCILE_PEAK_SECONDS", &s.cmsPeak),
 		secondsVar("CMS_RECONCILE_QUIET_SECONDS", &s.cmsQuiet),
 		secondsVar("AUTO_DISTRIBUTE_SECONDS", &s.autoDistribute),
 		secondsVar("DISTRIBUTION_FOLLOW_SECONDS", &s.distributionFollow),
 		secondsVar("EDIT_REPORT_CHECK_SECONDS", &s.editReportCheck),
 		secondsVar("PLATFORMS_FALLBACK_SECONDS", &s.platformsFallback),
+		windowVar("MANUAL_LOOKUP_WINDOW", &s.manualLookupWindow),
+		secondsVar("MANUAL_LOOKUP_SECONDS", &s.manualLookup),
 	}
 }
 
@@ -147,4 +157,12 @@ func (s jobIntervals) cmsWait(now time.Time) time.Duration {
 		interval = s.cmsPeak
 	}
 	return min(interval, s.cmsPeakWindow.untilEdge(now))
+}
+
+// manualWait 人工发的号查链接这一轮之后隔多久：时段里按 MANUAL_LOOKUP_SECONDS，时段外睡到时段开始，不白醒。
+func (s jobIntervals) manualWait(now time.Time) time.Duration {
+	if s.manualLookupWindow.contains(now) {
+		return min(s.manualLookup, s.manualLookupWindow.untilEdge(now))
+	}
+	return s.manualLookupWindow.untilEdge(now)
 }

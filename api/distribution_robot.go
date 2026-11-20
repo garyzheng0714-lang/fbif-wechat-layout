@@ -177,6 +177,8 @@ type distributionRobotAPI interface {
 	Publish(ctx context.Context, platform, key, actor string) (robotDraftRecord, error)
 	// Unpublish 把这个键已发布的那篇下线（publish_external_unpublish.go）。
 	Unpublish(ctx context.Context, platform, key, actor string) (robotDraftRecord, error)
+	// PublicArticles 按号的公开主页读它最近公开的文章，新的在前（不登录、不开浏览器；人工发的号用，publish_external_manual.go）。
+	PublicArticles(ctx context.Context, platform, homepage string) ([]externalArticleRef, error)
 }
 
 // 分发服务错误响应里的 outcome：这次有没有动手。
@@ -333,6 +335,35 @@ func (c *distributionRobotClient) Platforms(ctx context.Context) ([]distribution
 		return nil, errors.New("分发服务返回的平台限制无法解析")
 	}
 	return body.Platforms, nil
+}
+
+func (c *distributionRobotClient) PublicArticles(ctx context.Context, platform, homepage string) ([]externalArticleRef, error) {
+	body, err := json.Marshal(map[string]string{"homepage": homepage})
+	if err != nil {
+		return nil, err
+	}
+	status, raw, err := c.do(ctx, http.MethodPost, "/v1/platforms/"+url.PathEscape(platform)+"/public-articles", body)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("分发服务没读成公开文章（HTTP %d）：%s", status, c.parseError(status, raw).Message)
+	}
+	var reply struct {
+		Articles []struct {
+			Title       string    `json:"title"`
+			PublishedAt time.Time `json:"published_at"`
+			URL         string    `json:"url"`
+		} `json:"articles"`
+	}
+	if err := json.Unmarshal(raw, &reply); err != nil {
+		return nil, errors.New("分发服务回的公开文章无法解析")
+	}
+	out := make([]externalArticleRef, 0, len(reply.Articles))
+	for _, a := range reply.Articles {
+		out = append(out, externalArticleRef{URL: strings.TrimSpace(a.URL), Title: strings.TrimSpace(a.Title), PublishedAt: a.PublishedAt.UTC()})
+	}
+	return out, nil
 }
 
 func (c *distributionRobotClient) Draft(ctx context.Context, platform, key string) (robotDraftRecord, error) {

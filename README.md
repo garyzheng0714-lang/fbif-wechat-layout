@@ -408,6 +408,7 @@ FBIF 中台下发（2026-10-26 起）：`CLOUDCONVERT_API_KEY`、`FEISHU_LOGIN_A
 | `DISTRIBUTION_FOLLOW_SECONDS` | 分发进度跟进（没有在途的不问分发服务） | `60` |
 | `EDIT_REPORT_CHECK_SECONDS` | 编辑周报检查 | `1800` |
 | `PLATFORMS_FALLBACK_SECONDS` | 平台限制兜底 | `21600` |
+| `MANUAL_LOOKUP_WINDOW` / `MANUAL_LOOKUP_SECONDS` | 人工发的号查链接（时段外不查；没有等人发的稿不问分发服务） | `09:00-21:00` / `1800` |
 
 秒数在 60 到 2592000 之间。
 

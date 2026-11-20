@@ -27,7 +27,8 @@
         "baijiahao.baidu.com",
         "mbd.baidu.com"
       ],
-      "manage_url": "https://baijiahao.baidu.com/builder/rc/content"
+      "manage_url": "https://baijiahao.baidu.com/builder/rc/content",
+      "public_articles": false
     },
     {
       "id": "toutiao",
@@ -57,7 +58,8 @@
         "www.toutiao.com",
         "m.toutiao.com"
       ],
-      "manage_url": "https://mp.toutiao.com/profile_v4/manage/content/all"
+      "manage_url": "https://mp.toutiao.com/profile_v4/manage/content/all",
+      "public_articles": false
     },
     {
       "id": "douyin",
@@ -105,7 +107,8 @@
       "hosts": [
         "zhuanlan.zhihu.com"
       ],
-      "manage_url": "https://zhuanlan.zhihu.com/drafts"
+      "manage_url": "https://zhuanlan.zhihu.com/drafts",
+      "public_articles": false
     },
     {
       "id": "tencent",
@@ -135,7 +138,8 @@
         "page.om.qq.com",
         "new.qq.com"
       ],
-      "manage_url": "https://om.qq.com/main/management/articleManage"
+      "manage_url": "https://om.qq.com/main/management/articleManage",
+      "public_articles": true
     }
   ]
 }

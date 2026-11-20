@@ -48,6 +48,8 @@ type distributionPlatformInfo struct {
 	DailyLimit int                   `json:"daily_limit"`
 	Hosts      []string              `json:"hosts"`
 	ManageURL  string                `json:"manage_url"`
+	// PublicArticles 分发服务能不登录读这个平台上号公开的最近文章（POST /v1/platforms/{platform}/public-articles）。
+	PublicArticles bool `json:"public_articles"`
 }
 
 type distributionTitleRule struct {
@@ -173,6 +175,8 @@ type distributionPlatform struct {
 	URLHosts []string
 	// 平台后台的内容管理页：没拿到文章或草稿链接时，卡片与侧边栏给这个链接看情况。
 	ManageURL string
+	// 能按号的「主页」读它公开的最近文章：人工发的号靠它认人发了哪篇（publish_external_manual.go）。
+	PublicArticles bool
 }
 
 func (i distributionPlatformInfo) platform() distributionPlatform {
@@ -183,6 +187,7 @@ func (i distributionPlatformInfo) platform() distributionPlatform {
 		CaptionMax: i.Caption.Max, CaptionCount: i.Caption.Count,
 		ImageMaxBytes: i.Images.MaxBytes, GIFMaxBytes: i.Images.GIFMaxBytes,
 		DailyLimit: i.DailyLimit, URLHosts: append([]string(nil), i.Hosts...), ManageURL: i.ManageURL,
+		PublicArticles: i.PublicArticles,
 	}
 }
 

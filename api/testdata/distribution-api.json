@@ -199,6 +199,20 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/v1/platforms/{platform}/public-articles",
+      "errors": [
+        "unauthorized",
+        "not_found",
+        "invalid_request",
+        "too_large",
+        "internal_error",
+        "unknown_platform",
+        "not_supported",
+        "platform_error"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/v1/accounts/{account}/login",
       "errors": [

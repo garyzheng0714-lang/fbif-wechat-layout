@@ -58,6 +58,7 @@ type hubAccountRow struct {
 	Auto         bool   `json:"auto_distribute"`
 	ServerLogin  string `json:"server_login_status"`
 	CheckedAt    string `json:"checked_at"`
+	Homepage     string `json:"homepage_url"`
 }
 
 // loadHubConfig 配置包地址和钥匙；错误信息只说缺哪个变量，绝不回显钥匙。
@@ -186,6 +187,7 @@ func (c *hubBundleClient) poll(ctx context.Context) hubOutcome {
 					ID: row.Code, Platform: row.PlatformCode, Carrier: row.Carrier, Name: row.DisplayName, Status: row.Status,
 					Source: row.Source, NotifyChat: row.NotifyChat, Auto: row.Auto,
 					Login: strings.TrimSpace(row.ServerLogin), LoginCheckedAt: checked.UTC(),
+					Homepage: strings.TrimSpace(row.Homepage),
 				})
 			}
 		}

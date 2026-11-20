@@ -252,6 +252,10 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 			continue
 		}
 		outlook := externalLaneOutlookOf(job, lane, now)
+		// 号改成人工发以后，它上面以前没推成的归人去发，不算失败（publish_external_manual.go）。
+		if outlook.Manual {
+			continue
+		}
 		// 号没登录停着的不算这一篇失败：按号报一条，等到 30 天。
 		if outlook.Login == externalLoginWaiting {
 			status.noteLoginWait(outlook.Target, job.ID)

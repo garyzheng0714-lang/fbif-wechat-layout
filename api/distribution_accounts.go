@@ -23,7 +23,9 @@ const (
 	externalAccountsFile = "distribution-accounts.json"
 
 	// 表里「在用」的号才会被自动挑上；「测试」号只在指定时用（分发服务那边同一口径）。
-	externalAccountLive    = "在用"
+	externalAccountLive = "在用"
+	// 「人工发」的号系统不推，人自己去平台发，卡片上显示发没发（publish_external_manual.go）。
+	externalAccountManual  = "人工发"
 	externalCarrierArticle = "article"
 )
 
@@ -42,6 +44,8 @@ type externalAccount struct {
 	// （「最近检查」）。只用来判断因为没登录停着的 lane 能不能接着推（publish_external_retry.go）。
 	Login          string    `json:"login,omitempty"`
 	LoginCheckedAt time.Time `json:"login_checked_at,omitzero"`
+	// Homepage 表里「主页」：人工发的号从这里认出平台公开页上的作者（publish_external_manual.go）。
+	Homepage string `json:"homepage,omitempty"`
 	// Label 卡片、改稿页、提醒里叫它什么：平台名；同一平台不止一个号时用表里的账号名。不落盘，读出时算。
 	Label string `json:"-"`
 	// platform 取账号目录时一并记下的平台限制，一次操作里卡片、检查、推送都用这一份。不落盘。
@@ -257,8 +261,10 @@ func validExternalAccountID(id string) bool {
 }
 
 // externalTargets 排版工具会往哪些号发文章：表里在用、载体是文章的号，按表里的顺序。
+// Manual 是「人工发」的文章号：系统不推，推送、重推、卡片按钮、改稿页、提醒只看 Targets，碰不到它们。
 type externalTargets struct {
 	Targets []externalAccount
+	Manual  []externalAccount
 }
 
 func loadExternalTargets() (externalTargets, error) {
@@ -274,18 +280,27 @@ func externalTargetsFrom(accounts []externalAccount, platforms map[string]distri
 	var out externalTargets
 	perPlatform := map[string]int{}
 	for _, account := range accounts {
-		if account.Carrier != externalCarrierArticle || account.Status != externalAccountLive {
+		if account.Carrier != externalCarrierArticle {
 			continue
 		}
 		account.platform = platforms[account.Platform]
-		out.Targets = append(out.Targets, account)
+		switch account.Status {
+		case externalAccountLive:
+			out.Targets = append(out.Targets, account)
+		case externalAccountManual:
+			out.Manual = append(out.Manual, account)
+		default:
+			continue
+		}
 		perPlatform[account.Platform]++
 	}
-	for i := range out.Targets {
-		target := &out.Targets[i]
-		target.Label = platformForAccount(*target).Name
-		if perPlatform[target.Platform] > 1 && strings.TrimSpace(target.Name) != "" {
-			target.Label = strings.TrimSpace(target.Name)
+	for _, list := range [][]externalAccount{out.Targets, out.Manual} {
+		for i := range list {
+			target := &list[i]
+			target.Label = platformForAccount(*target).Name
+			if perPlatform[target.Platform] > 1 && strings.TrimSpace(target.Name) != "" {
+				target.Label = strings.TrimSpace(target.Name)
+			}
 		}
 	}
 	return out
@@ -293,15 +308,41 @@ func externalTargetsFrom(accounts []externalAccount, platforms map[string]distri
 
 // forJob 这篇稿能发的号：表里「来源公众号」与这篇的公众号一致。
 func (c externalTargets) forJob(job publishJob) []externalAccount {
+	return accountsForJob(c.Targets, job)
+}
+
+// manualForJob 这篇稿该有人去发的「人工发」号，口径同 forJob。
+func (c externalTargets) manualForJob(job publishJob) []externalAccount {
+	return accountsForJob(c.Manual, job)
+}
+
+func accountsForJob(accounts []externalAccount, job publishJob) []externalAccount {
 	source := strings.TrimSpace(job.SourceName)
 	var out []externalAccount
-	for _, target := range c.Targets {
+	for _, target := range accounts {
 		if source != "" && strings.TrimSpace(target.Source) == source {
 			out = append(out, target)
 		}
 	}
 	return out
 }
+
+// account 按账号编号取文章号，推送的、人工发的都算：只给登记人工已发、补链接用，推送一律走 target、jobTarget。
+func (c externalTargets) account(accountID string) (externalAccount, bool) {
+	if target, ok := c.target(accountID); ok {
+		return target, true
+	}
+	accountID = strings.TrimSpace(accountID)
+	for _, account := range c.Manual {
+		if accountID != "" && account.ID == accountID {
+			return account, true
+		}
+	}
+	return externalAccount{}, false
+}
+
+// manual 这个号是不是「人工发」的。
+func (a externalAccount) manual() bool { return a.Status == externalAccountManual }
 
 // target 按账号编号取在用的文章号（不限来源公众号：补链接、核对这些只认已有的 lane）。
 func (c externalTargets) target(accountID string) (externalAccount, bool) {

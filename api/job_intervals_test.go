@@ -18,7 +18,8 @@ func TestJobIntervalsDefaultsWhenHubSendsNothing(t *testing.T) {
 	}
 	want := "间隔（总账本「定时任务和回调」）：CMS_RECONCILE_PEAK_WINDOW=08:30-18:00（默认） CMS_RECONCILE_PEAK_SECONDS=120（默认） " +
 		"CMS_RECONCILE_QUIET_SECONDS=1800（默认） AUTO_DISTRIBUTE_SECONDS=600（默认） DISTRIBUTION_FOLLOW_SECONDS=60（默认） " +
-		"EDIT_REPORT_CHECK_SECONDS=1800（默认） PLATFORMS_FALLBACK_SECONDS=21600（默认）"
+		"EDIT_REPORT_CHECK_SECONDS=1800（默认） PLATFORMS_FALLBACK_SECONDS=21600（默认） " +
+		"MANUAL_LOOKUP_WINDOW=09:00-21:00（默认） MANUAL_LOOKUP_SECONDS=1800（默认）"
 	if line != want {
 		t.Fatalf("启动日志：\n%s\n要\n%s", line, want)
 	}
@@ -34,11 +35,13 @@ func TestJobIntervalsReadHubValues(t *testing.T) {
 		"DISTRIBUTION_FOLLOW_SECONDS": "120",
 		"EDIT_REPORT_CHECK_SECONDS":   "3600",
 		"PLATFORMS_FALLBACK_SECONDS":  "43200",
+		"MANUAL_LOOKUP_WINDOW":        "08:00-22:00",
+		"MANUAL_LOOKUP_SECONDS":       "900",
 	}))
 	want := jobIntervals{
 		cmsPeak: 5 * time.Minute, cmsPeakWindow: dayWindow{7 * 60, 23 * 60}, cmsQuiet: time.Hour,
 		autoDistribute: 15 * time.Minute, distributionFollow: 2 * time.Minute, editReportCheck: time.Hour,
-		platformsFallback: 12 * time.Hour,
+		platformsFallback: 12 * time.Hour, manualLookup: 15 * time.Minute, manualLookupWindow: dayWindow{8 * 60, 22 * 60},
 	}
 	if got != want {
 		t.Fatalf("换上中台的值：%+v", got)
@@ -116,6 +119,25 @@ func TestCMSWaitFollowsHubWindow(t *testing.T) {
 		{at(21, 40), 20 * time.Minute},
 	} {
 		if got := s.cmsWait(c.now); got != c.want {
+			t.Errorf("%s：%v，要 %v", c.now.Format("15:04"), got, c.want)
+		}
+	}
+}
+
+// TestManualWaitSleepsOutsideWindow 人工发的号查链接：时段里按间隔，临近收工提前醒一次就停，时段外一觉睡到开工。
+func TestManualWaitSleepsOutsideWindow(t *testing.T) {
+	at := func(hour, minute int) time.Time { return time.Date(2026, 11, 21, hour, minute, 0, 0, beijing) }
+	s := defaultJobIntervals // 09:00-21:00 每 30 分钟
+	for _, c := range []struct {
+		now  time.Time
+		want time.Duration
+	}{
+		{at(9, 0), 30 * time.Minute},
+		{at(20, 50), 10 * time.Minute},
+		{at(21, 0), 12 * time.Hour},
+		{at(3, 0), 6 * time.Hour},
+	} {
+		if got := s.manualWait(c.now); got != c.want {
 			t.Errorf("%s：%v，要 %v", c.now.Format("15:04"), got, c.want)
 		}
 	}

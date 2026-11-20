@@ -13,6 +13,7 @@ package main
 //     与这个账号上一次外发至少隔 publishExternalAutoBackfillSpacing，避免集中刷屏被风控。
 
 import (
+	"context"
 	"errors"
 	"log"
 	"sort"
@@ -80,6 +81,13 @@ func (p *publishPipeline) startExternalAutoDistribution() {
 		for {
 			p.followRobotLanes()
 			time.Sleep(intervals.distributionFollow)
+		}
+	}()
+	// 人工发的号：MANUAL_LOOKUP_WINDOW 时段里每 MANUAL_LOOKUP_SECONDS 经分发服务看等人发的稿发了没有（publish_external_manual.go），时段外不醒。
+	go func() {
+		for {
+			p.followExternalManualLanes(context.Background(), time.Now().UTC())
+			time.Sleep(intervals.manualWait(time.Now()))
 		}
 	}()
 }
