@@ -3,6 +3,7 @@
  * 真按 Cmd/Ctrl+V，不模拟事件；断言全程没有点过任何按钮。
  */
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 import path from 'path';
 import fs from 'fs';
 
@@ -28,10 +29,7 @@ async function newAuthenticatedContext(browser) {
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const resp = await context.request.post(`${BASE}/auth/dev-login`, {
-    data: { username: E2E_USERNAME },
-  });
-  if (!resp.ok()) throw new Error(`E2E 登录失败（${resp.status()}）：${await resp.text()}`);
+  await loginAs(context, { username: E2E_USERNAME });
   return context;
 }
 

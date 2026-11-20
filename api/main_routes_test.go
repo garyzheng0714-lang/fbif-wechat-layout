@@ -13,24 +13,8 @@ import (
 func newRoutingMux(t *testing.T, publicDir string) *http.ServeMux {
 	t.Helper()
 	mux := http.NewServeMux()
-	registerChannelRoutes(mux, publicDir, func(h http.Handler) http.Handler { return h })
+	registerChannelRoutes(mux, publicDir)
 	return mux
-}
-
-// 页面都套登录门：没登录打开 /mp、/ft、/app.html、/site.html 都先跳去登录。
-func TestChannelRoutes_GatePages(t *testing.T) {
-	publicDir := mustWriteBothHTML(t)
-	mux := http.NewServeMux()
-	registerChannelRoutes(mux, publicDir, func(http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/auth/login", http.StatusFound) })
-	})
-	for _, path := range []string{"/mp", "/mp/fbif", "/ft/foodtalks", "/app", "/app.html", "/site.html"} {
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusFound {
-			t.Errorf("GET %s = %d, want 302", path, rec.Code)
-		}
-	}
 }
 
 // mustWriteAppHTML 在 t.TempDir 里写一份带 marker 的 app.html，返回目录。

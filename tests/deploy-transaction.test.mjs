@@ -48,7 +48,10 @@ test('deploy transaction shell is syntactically valid and restores every live su
   assert.match(script, /trap 'on_activate_error \$\?' ERR/);
   assert.match(script, /trap 'on_activate_error 143' TERM/,
     '远端收到 Actions 取消 TERM 时也必须回滚');
-  assert.match(script, /caddy validate --adapter caddyfile --config "\$RELEASE_DIR\/caddy\/fbifmp-layout\.caddy"/);
+  // 站点文件 import 登录中心的入口片段，和片段叠在一起校验（单独校验找不到片段）。
+  assert.match(script, /GATEWAY_SNIPPET=\/etc\/caddy\/snippets\/fbif-login\.caddy/);
+  assert.match(script, /\[\[ -f "\$GATEWAY_SNIPPET" \]\] \|\| die/);
+  assert.match(script, /caddy validate --adapter caddyfile --config "\$RELEASE_DIR\/caddy\/validate\.caddyfile"/);
   assert.match(script, /restore_path caddy "\$CADDY_TARGET"/,
     '首次部署没有旧 vhost 时也必须删除失败候选');
   assert.match(script, /cp -a -- "\$BACKUP_ROOT\/\$name" "\$target"/,
@@ -225,6 +228,8 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
     '/api/publish/jobs',
     '/api/feishu/card-callback',
     '/api/oss-upload',
+    '"302 ${SITE_ORIGIN}/auth/login?next="',
+    '[ "$forged_status" = "401" ]',
     'readiness_json=$(remote_transaction readiness)',
     'unpaused_readiness=$(remote_transaction readiness)',
   ]) {
@@ -232,14 +237,14 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   }
 });
 
-// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）和统一登录的 6 个 SSO_*（2026-11-10）由中台本机代理写进
+// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）和飞书授权的封存钥匙 SSO_TOKEN_KEY 由中台本机代理写进
 // /etc/fbif-hub/env/layout.env、render.env，systemd drop-in 让服务最后读、同名为准。CI 再从
 // GitHub Secrets 写一份，中台换值后 GitHub 那份就过期了，所以 CI 既不持有也不写它们。
 const HUB_LAYOUT_VARIABLES = [
   'CLOUDCONVERT_API_KEY', 'FEISHU_LOGIN_APP_SECRET', 'PUBLISH_ADMIN_SERVICE_TOKEN', 'RENDER_TOKEN',
   'DISTRIBUTION_API_TOKEN', 'FEISHU_APP_SECRET', 'FOODTALKS_TOKEN', 'HUB_KEY',
   'PUBLISH_SYNC_SERVICE_TOKEN', 'TIKHUB_API_KEY',
-  'SSO_ISSUER', 'SSO_CLIENT_ID', 'SSO_CENTER_ISSUER', 'SSO_TOKEN_KEY', 'SSO_HUB_KEY', 'SSO_CENTER_CLIENT_SECRET',
+  'SSO_TOKEN_KEY',
 ];
 
 test('deploy workflow neither holds nor writes hub-managed variables; readiness goes through the server', async () => {
@@ -259,11 +264,9 @@ test('deploy workflow neither holds nor writes hub-managed variables; readiness 
   }
   // 2026-11-10 换统一登录：本项目不再收密码，密码账号名单不再下发。
   assert.doesNotMatch(workflow, /AUTH_PASSWORD_USERS_B64/);
-  // 统一登录里按本项目定的三个（回调地址、中台入口、待办文件）由部署写，钥匙和集成平台编号归中台。
+  // 登录由入口统一拦截（2026-11-20），部署不再写任何登录变量；飞书授权的回调地址照写。
+  assert.doesNotMatch(workflow, /SSO_(?:REDIRECT_URL|HUB_URL|OUTBOX_FILE|ISSUER|CLIENT_ID|HUB_KEY|CENTER_)/);
   for (const line of [
-    'SSO_REDIRECT_URL=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/callback',
-    'SSO_HUB_URL=http://127.0.0.1:13199/hub-auth/layout',
-    'SSO_OUTBOX_FILE=/var/www/api/data/sso-outbox.json',
     'FEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback',
   ]) {
     assert.ok(workflow.includes(`${line}\\n`), `api.env 要写 ${line}`);
@@ -347,58 +350,50 @@ test('render service has its own lockfile for staging npm ci', async () => {
   assert.ok(lock.packages['node_modules/linkedom']?.version);
 });
 
-test('Caddy sends every API to Go before static fallback and keeps only named legacy routes', async () => {
+// 登录由入口统一拦截（FBIF 统一登录 v5，2026-11-20）：站点最后一行 import 登录中心的片段，其余都要登录后交给 Go；
+// 写在它前面的 handle 不过登录，必须删掉浏览器带来的 X-FBIF-User，且和 Go 认的「别的程序调的路径」是同一张单子。
+test('Caddy puts the login gateway last, program paths before it strip X-FBIF-User and match Go', async () => {
   const vhost = await projectFile('deploy/caddy/fbifmp-layout.caddy');
-  const fallbackAt = vhost.indexOf('\n\thandle {');
-  assert.ok(fallbackAt > 0, '必须存在最终静态 fallback');
-  const routed = vhost.slice(0, fallbackAt);
-
-  assert.match(routed, /@fbifAPI path \/api \/api\/\*/,
-    '所有 API 必须先落 Go，未知路由 Go 返回 JSON 404');
-  // 2026-11-09 安全审计：9000 的旧 Python 程序只看 Origin/Referer，/api/wechat-draft、/api/oss-presign
-  // 已从公网摘掉；它只留给 Go 本机转存图片（WECHAT_UPLOAD_ENDPOINT），站点里不许再有转给 9000 的路由。
   const directives = vhost.split('\n').filter(line => !line.trim().startsWith('#')).join('\n');
+  const body = directives.slice(directives.indexOf('{') + 1, directives.lastIndexOf('}')).trim();
+  assert.ok(body.endsWith('import fbif_login 127.0.0.1:9001'), '入口拦截必须是站点最后一条，交给 Go 9001');
+  assert.doesNotMatch(directives, /^\s*handle\s*\{/m, '不得再有不过登录的兜底 handle，否则页面和接口绕过登录');
   assert.doesNotMatch(directives, /:9000\b/, '公网不得再直通 9000 的旧程序');
   assert.doesNotMatch(directives, /wechat-draft|oss-presign/);
+  assert.doesNotMatch(directives, /fresh/, '本项目没有要「刚核对过」的接口');
 
-  for (const route of ['/api/*', '/preview/*', '/mp/*', '/ft/*']) {
-    assert.ok(routed.includes(route), `${route} 必须在静态 fallback 前代理`);
-  }
-
-  // 自动从非测试 Go 文件提取公开 API/preview 路由，确认 catch-all
-  // 与非 API 预览页一起覆盖所有 Go 路由。
-  const apiDir = new URL('../api/', import.meta.url);
-  const goFiles = (await readdir(apiDir)).filter(name => name.endsWith('.go') && !name.endsWith('_test.go'));
-  const goRoutes = new Set();
-  for (const name of goFiles) {
-    const source = await readFile(new URL(name, apiDir), 'utf8');
-    for (const match of source.matchAll(/mux\.HandleFunc\("(?:[A-Z]+ )?(\/(?:api|preview)[^" ]*)"/g)) {
-      goRoutes.add(match[1]);
+  // 每个写在 import 前的 handle 都先删掉浏览器带来的 X-FBIF-User（静态文件不进 Go，不用删）。
+  const handles = [...directives.matchAll(/^\thandle @(\w+) \{\n([\s\S]*?)\n\t\}/gm)];
+  assert.deepEqual(handles.map(h => h[1]), ['fbifProgram', 'fbifProgramKey', 'fbifFeishuGrant', 'fbifStatic']);
+  for (const [, name, inner] of handles) {
+    if (name === 'fbifStatic') {
+      assert.doesNotMatch(inner, /reverse_proxy/);
+      continue;
     }
+    assert.match(inner, /^\t\t(?:\t)?request_header -X-FBIF-User$/m, `${name} 必须删掉浏览器带来的 X-FBIF-User`);
+    assert.match(inner, /reverse_proxy 127\.0\.0\.1:9001/);
   }
 
-  const caddyPatterns = [];
-  for (const line of routed.split('\n')) {
-    const pathDirective = line.match(/\bpath\s+(.+)$/);
-    if (pathDirective) caddyPatterns.push(...pathDirective[1].trim().split(/\s+/));
-    const directHandle = line.match(/^\s*handle\s+(\/[^\s{]+)/);
-    if (directHandle) caddyPatterns.push(directHandle[1]);
-  }
-  const covered = route => caddyPatterns.some(pattern => {
-    if (pattern.endsWith('/*')) {
-      const base = pattern.slice(0, -2);
-      return route === base || route.startsWith(base + '/');
-    }
-    if (pattern.endsWith('*')) return route.startsWith(pattern.slice(0, -1));
-    return route === pattern;
-  });
-  // 智能体入口（api/agent_mcp.go、api/internal/mcpauth）：MCP、授权、授权元数据都由 Go 回，不能落到静态 fallback。
-  for (const route of ['/mcp', '/oauth/authorize', '/oauth/token', '/oauth/register', '/oauth/revoke',
-    '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server']) {
-    goRoutes.add(route);
-  }
-  for (const route of goRoutes) {
-    assert.ok(covered(route), `Go 路由 ${route} 未被 Caddy 白名单覆盖`);
+  // 飞书授权在 /auth/* 下，但由本项目处理：照样先问登录中心认人（只用 caddy 开关，不是 fresh）。
+  const grant = handles.find(h => h[1] === 'fbifFeishuGrant')[2];
+  assert.match(directives, /@fbifFeishuGrant path \/auth\/feishu-grant \/auth\/feishu\/fbif\/qr-callback\n/);
+  // 必须包在 route 里按写的顺序跑：handle 里 forward_auth 排在 request_header 前，先删头会把中心给的人也删掉（2026-11-20 本机实测）。
+  assert.match(grant, /^\t\troute \{\n\t\t\trequest_header -X-FBIF-User\n\t\t\tforward_auth 127\.0\.0\.1:19160 \{\n\t\t\t\turi \/_fbif\/verify\n\t\t\t\theader_up X-FBIF-Verify caddy\n\t\t\t\tcopy_headers X-FBIF-User/);
+
+  // 编辑器页面不能当静态文件不过登录发出去。
+  assert.match(directives, /not path \/ \/index\.html \/app\.html \/site\.html\n/);
+
+  // 不过登录的路径和 Go 的 programPathPrefixes 是同一张单子。
+  const caddyProgram = directives.match(/@fbifProgram path (.+)\n/)[1].trim().split(/\s+/)
+    .map(p => p.endsWith('/*') ? p.slice(0, -1) : p.endsWith('*') ? p.slice(0, -1) : p);
+  const goSource = await projectFile('api/auth_login.go');
+  const goList = goSource.match(/var programPathPrefixes = \[\]string\{([\s\S]*?)\n\}/)[1];
+  const goProgram = [...goList.matchAll(/"([^"]+)"/g)].map(m => m[1]);
+  const normalize = list => [...new Set(list.map(p => p.replace(/\/\*?$/, '')))].sort();
+  assert.deepEqual(normalize(caddyProgram).filter(p => p !== '/api/render'), normalize(goProgram).filter(p => p !== '/api/render'));
+  assert.ok(caddyProgram.includes('/api/render') && goProgram.includes('/api/render'));
+  for (const human of ['/oauth/authorize', '/api/me', '/api/auth/me', '/mp/']) {
+    assert.ok(!caddyProgram.some(p => human.startsWith(p)), `${human} 要登录，不能写在入口拦截前`);
   }
 });
 

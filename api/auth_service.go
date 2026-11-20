@@ -2,8 +2,8 @@ package main
 
 // auth_service.go — 排版工具里「谁在用、是什么角色、能不能替他调飞书」的全部判断。
 //
-//   - 谁在用：FBIF 统一登录（internal/auth，登录模板原样复制）认人，接线在 auth_login.go；
-//     本项目没有登录页、不收密码、不发会话。业务代码只调 currentUser / requireFeishuUser / requireRuleAdmin / requireSuperAdmin。
+//   - 谁在用：入口（Caddy 问 FBIF 登录中心）写在请求头 X-FBIF-User 里的人（internal/login），接线在 auth_login.go；
+//     本项目没有登录代码、不收密码、不发会话。业务代码只调 currentUser / requireFeishuUser / requireRuleAdmin / requireSuperAdmin。
 //   - 角色：记在 auth-users.json（auth_users.go）；超级管理员只认部署配置 RULE_SUPER_ADMIN_OPEN_IDS 里的 open_id。
 //   - 调飞书开放平台（搜文档、导出、列群）：本人授权一次的 user_access_token（internal/feishugrant，模板原样复制），
 //     只用 userAccessToken 取，令牌不出后端。
@@ -67,8 +67,8 @@ type authService struct {
 	config           authConfig
 	users            *authUserStore
 	feishu           feishuProvider
-	tokens           feishuTokenSource // nil：飞书应用没配，谁都授权不了
-	login            loginBackend      // nil：没装配登录（单元测试），请求上的人由测试放进 context
+	tokens           feishuTokenSource   // nil：飞书应用没配，谁都授权不了
+	grants           *feishugrant.Grants // 本人飞书授权的路由；nil：飞书应用没配，或单元测试
 	feishuExportJobs *feishuExportJobManager
 }
 
@@ -101,7 +101,7 @@ func (s *authService) now() time.Time {
 type layoutUserKey struct{}
 type loginUnavailableKey struct{}
 
-// withLayoutUser 把本项目用户 ID 放进 context：登录接线（auth_login.go）给每个已登录请求放，后台任务取飞书令牌时也放。
+// withLayoutUser 把本项目用户 ID 放进 context：auth_login.go 的 Wrap 给每个带人的请求放，后台任务取飞书令牌时也放。
 func withLayoutUser(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, layoutUserKey{}, id)
 }
@@ -177,11 +177,8 @@ func (s *authService) effectiveRole(user authUser) authRole {
 	return role
 }
 
-// agentCapable 身份菜单给不给「接入智能体」：按登录方式定（没有登录后端的测试按飞书同事算）。
+// agentCapable 身份菜单给不给「接入智能体」：飞书登录的 FBIF 同事。
 func (s *authService) agentCapable(user authUser) bool {
-	if s.login != nil {
-		return s.login.agentCapable(user)
-	}
 	return feishuColleague(user)
 }
 

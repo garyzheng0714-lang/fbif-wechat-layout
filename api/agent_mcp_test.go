@@ -37,14 +37,14 @@ type agentTestEnv struct {
 }
 
 // newAgentTestEnv 起一个真的 HTTP 服务：授权、MCP、上传、编辑器取回都走真路由；排版程序、抓取、模型是假的。
-// 请求上的人由 X-Test-User 放进 context（生产里是统一登录模板认出来再放）。
+// 请求上的人由 X-Test-User 放进 context（生产里是 auth_login.go 的 Wrap 读入口给的 X-FBIF-User 再放）。
 func newAgentTestEnv(t *testing.T) *agentTestEnv {
 	t.Helper()
 	env := &agentTestEnv{t: t, layout: newLayoutTestEnv(t), auth: newTestAuthService(t, nil)}
 	env.layout.node.check = articleCheckSource{Title: "标题", Text: articleCheckBody}
 	for _, u := range []authUser{
-		{ID: agentTestPerson, Name: "王小明", AuthMode: authModeFeishu, Status: authUserActive},
-		{ID: agentTestColleague, Name: "李四", AuthMode: authModeFeishu, Status: authUserActive},
+		{ID: agentTestPerson, Name: "王小明", AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "union_me", LastLoginAt: env.auth.now()},
+		{ID: agentTestColleague, Name: "李四", AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "union_colleague", LastLoginAt: env.auth.now()},
 	} {
 		mustSessionForUser(t, env.auth, u)
 	}

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 import JSZip from 'jszip';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
@@ -69,11 +70,11 @@ async function authenticatedContext(browser) {
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const response = await context.request.post(`${BASE}/auth/dev-login`, { data: LOGIN });
-  if (!response.ok()) {
-    const body = await response.text();
+  try {
+    await loginAs(context, LOGIN);
+  } catch (error) {
     await context.close();
-    throw new Error(`E2E 登录失败（${response.status()}）：${body}`);
+    throw error;
   }
   return context;
 }

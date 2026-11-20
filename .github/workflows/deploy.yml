@@ -64,7 +64,7 @@ jobs:
           set -Eeuo pipefail
 
           # 所有必需配置必须在任何远端 live 写入前 fail loud。只打印变量名，绝不打印值。
-          # CLOUDCONVERT_API_KEY、FEISHU_LOGIN_APP_SECRET、PUBLISH_ADMIN_SERVICE_TOKEN、RENDER_TOKEN、统一登录的六个 SSO_*
+          # CLOUDCONVERT_API_KEY、FEISHU_LOGIN_APP_SECRET、PUBLISH_ADMIN_SERVICE_TOKEN、RENDER_TOKEN、SSO_TOKEN_KEY（飞书授权封存钥匙）
           # 由 FBIF 中台下发到服务器的 /etc/fbif-hub/env/layout.env、render.env，CI 不持有也不写；
           # 事务脚本 preflight 时查中台文件。
           for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH RULE_SUPER_ADMIN_OPEN_IDS AUTH_SESSION_SECRET FEISHU_LOGIN_APP_ID; do
@@ -210,7 +210,7 @@ jobs:
 
           # publish.env 是手工维护的独立 EnvironmentFile，不在这里覆盖。中台下发的变量（上面 4 个和
           # publish.env 里原来的 6 个）只在中台文件里，systemd drop-in 让服务最后读它、同名为准。
-          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nRULE_SUPER_ADMIN_OPEN_IDS=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nSSO_REDIRECT_URL=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/callback\nSSO_HUB_URL=http://127.0.0.1:13199/hub-auth/layout\nSSO_OUTBOX_FILE=/var/www/api/data/sso-outbox.json\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$RULE_SUPER_ADMIN_OPEN_IDS" "$AUTH_SESSION_SECRET" "$FEISHU_LOGIN_APP_ID" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "http://127.0.0.1:19096" | base64 -w 0)
+          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nRULE_SUPER_ADMIN_OPEN_IDS=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$RULE_SUPER_ADMIN_OPEN_IDS" "$AUTH_SESSION_SECRET" "$FEISHU_LOGIN_APP_ID" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "http://127.0.0.1:19096" | base64 -w 0)
           printf -v env_stage_command 'umask 077; base64 -d > %q' "$RELEASE_DIR/api.env"
           printf '%s' "$ENV_CONTENT" | ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "$env_stage_command"
           # 渲染服务的 RENDER_TOKEN 由中台下发到 /etc/fbif-hub/env/render.env，这里不写。
@@ -252,6 +252,14 @@ jobs:
           publish_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             "${SITE_ORIGIN}/api/publish/jobs")
           [ "$publish_status" = "401" ]
+          # 登录由入口统一拦截：没登录打开编辑器去登录；自己带 X-FBIF-User 冒充的，入口删掉、照样 401。
+          page_login=$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{redirect_url}' \
+            --header 'Sec-Fetch-Mode: navigate' --header 'Accept: text/html' "${SITE_ORIGIN}/mp/fbif")
+          case "$page_login" in "302 ${SITE_ORIGIN}/auth/login?next="*) ;; *) echo "editor page did not redirect to login: $page_login"; exit 1 ;; esac
+          forged_user=$(printf '{"id":"FJY632B9P3E:forged","name":"x","company_code":"FJY632B9P3E"}' | base64 | tr '+/' '-_' | tr -d '=\n')
+          forged_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header 'Accept: application/json' --header "X-FBIF-User: ${forged_user}" "${SITE_ORIGIN}/api/auth/me")
+          [ "$forged_status" = "401" ]
           feishu_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
             --header 'Content-Type: application/json' --data '{}' \
             "${SITE_ORIGIN}/api/feishu/card-callback")

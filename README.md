@@ -278,7 +278,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/oss-upload` | 图片上传入口；未配置上游时返回原 base64。要登录会话（cookie 须同源）或服务钥匙（`EXPENSIVE_API_TOKEN`、`RENDER_TOKEN`），只带 Origin/Referer 一律 401 |
 | `POST` | `/api/wechat-upload` | 兼容旧名称的图片上传入口，门禁同上 |
 | `POST` | `/api/doc-to-docx` | 旧版 `.doc` 转 `.docx`；要登录会话或 `EXPENSIVE_API_TOKEN`，付费的 CloudConvert 兜底只认 `EXPENSIVE_API_TOKEN` |
-| `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片 |
+| `GET` | `/api/doc-cache/{hash}/{filename}` | 读取转换过程中缓存的图片（按内容哈希取，不过登录） |
 | `GET` | `/api/feishu/docs/search?q=&limit=` | 按关键词搜索当前飞书登录用户可见的云文档，供编辑器 `@` 导入下拉使用；需 FBIF 飞书登录并授权过飞书（没授权回 403 `feishu_grant_required`） |
 | `POST` | `/api/feishu/docs/export/jobs` | 创建飞书云文档导出作业，立即返回 `job_id` 与 `status_url` / `result_url`；导出、剥图与图片镜像在后台执行 |
 | `GET` | `/api/feishu/docs/export/jobs/{job_id}?after=&wait_ms=` | long-poll 读取作业进度：服务端在 `version` 超过 `after` 时立即返回，逐阶段上报真实 `phase`/`done`/`total`（resolve、create、export_wait、download、optimize、image_enumerate、image_upload、image_map） |
@@ -286,13 +286,12 @@ curl http://127.0.0.1:9000/api/health
 | `DELETE` | `/api/feishu/docs/export/jobs/{job_id}` | 取消作业；前端切换或放弃导入时调用，服务端也会自行过期回收 |
 | `POST` | `/api/feishu/docs/export` | 同步导出兼容入口（无进度）；交互式导入禁止使用，只走上面的异步作业接口 |
 | `GET` | `/api/feishu/chats` | 读取当前飞书登录用户所在群列表，供规则后台选择审核群；需 FBIF 飞书登录并授权过飞书 |
-| `GET` | `/auth/login?next=` | 没登录时去的地方：FBIF 统一登录（登录模板 `api/internal/auth`），送去登录中心 login.fbif.com（账号密码、飞书都在那页），登录完回到 `next`；本项目没有登录页 |
-| `GET` | `/auth/feishu/fbif/login?next=` | 直接用飞书登录（飞书客户端里没登录时前端走这条，不用再点） |
-| `POST` | `/auth/feishu/logout` | 退出统一登录（浏览器里经登录中心飞书登录的，同一浏览器的其他项目一起退出） |
-| `POST` | `/auth/backchannel-logout` | 登录中心送来的退出通知（别的项目退出了同一浏览器的飞书登录），登录模板自己处理；公网要能访问，Caddy 已放行 |
+| `GET` | `/auth/login?next=` | 没登录时去的地方：入口直接转给 FBIF 登录中心（账号密码、飞书都在那页），登录完回到 `next`；本项目没有登录页、不处理这条 |
+| `GET` | `/auth/feishu/fbif/login?next=` | 直接用飞书登录（飞书客户端里没登录时前端走这条，不用再点）；登录中心处理 |
+| `POST` | `/auth/feishu/logout` | 退出（登录中心处理；浏览器里经飞书登录的，同一浏览器的其他项目一起退出） |
 | `GET` | `/auth/feishu-grant?next=` | 本人授权飞书一次（读云文档、列群），之后服务端自动续；回调 `/auth/feishu/fbif/qr-callback`，没授权成回 `next` 时带 `feishu_grant=denied/failed/mismatch/unavailable` |
 | `GET` | `/api/auth/me` | 读取当前登录用户、登录方式、角色、飞书能力与飞书授权状态（`feishu`：`ok` / `required` / `none`）；没登录 401 带 `login_url`，登录服务连不上 503 |
-| `GET` | `/api/me` | 登录模板的「我是谁」（统一登录身份），本项目页面用上面的 `/api/auth/me` |
+| `GET` | `/api/me` | 登录中心的「我是谁」（入口转给中心），页面切回来时问它查登录；本项目页面的角色、能力用上面的 `/api/auth/me` |
 | `GET` | `/api/rules/active?account=<id>` | 读取指定账号（公众号或网站，`account=fbif/wowfood/foodtalks-series/foodtalks-mp/ft-default/ft-series`）当前规则；未传 `account` 时默认读取 FBIF |
 | `GET` | `/api/rules/presets` | 读取可供编辑器使用的规则预设目录 |
 | `POST` | `/api/rules/admin/login` | 已退役的共享密码入口，固定返回 `410 Gone`；后台只认登录会话和角色 |
@@ -360,11 +359,10 @@ curl http://127.0.0.1:9000/api/health
 | `PUBLISH_ADMIN_SERVICE_TOKEN` | 部署/运维调用发布管理接口的机器服务令牌；不作为网页登录密码，也不下发到浏览器 |
 | `RULE_SUPER_ADMIN_OPEN_IDS` | 超级管理员飞书 `open_id` 白名单，逗号分隔；真实身份值只放秘密配置，不写入仓库文档 |
 | `AUTH_SESSION_SECRET` | 未上架预览页、外发改稿页签名用的密钥（派生独立子密钥）；不再用于登录 |
-| `AUTH_USERS_PATH` | 本项目用户库（角色、停用）JSON；默认与规则存储同目录，统一登录的会话（`sso-sessions.json`）、飞书授权（`feishu-grants.json`）放在同一目录 |
-| `SSO_*` | FBIF 统一登录（登录模板 v7，`api/internal/auth`）：`SSO_REDIRECT_URL`、`SSO_HUB_URL`、`SSO_OUTBOX_FILE` 由部署写，其余六个由中台下发；缺一个就拒绝启动 |
+| `AUTH_USERS_PATH` | 本项目用户库（角色、停用）JSON；默认与规则存储同目录，飞书授权（`feishu-grants.json`）放在同一目录；本项目不存登录会话 |
+| `SSO_TOKEN_KEY` | 飞书授权（`api/internal/feishugrant`）封存令牌的钥匙，中台下发；沿用原来登录模板那把，换了已授权的人都要重新授权。登录由入口统一拦截，本项目没有别的登录变量 |
 | `FEISHU_LOGIN_APP_ID` / `FEISHU_LOGIN_APP_SECRET` / `FEISHU_LOGIN_REDIRECT_URI` | 本项目的飞书应用：本人授权飞书（读云文档、列群）与回调 `/auth/feishu/fbif/qr-callback`；生产必须完整配置，飞书应用「安全设置 → 重定向 URL」里要有 `https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback`（2026-11-10 统一登录上线时补上，缺了授权回不来） |
 | `FEISHU_LOGIN_SCOPES` | 可选，覆盖授权飞书时要的权限（`offline_access` 会自动加上） |
-| `AUTH_DEV_LOGIN` | 只给本地端到端测试：`go run -tags devlogin .` 时设 `true` 开 `POST /auth/dev-login`；生产编译里没有，`ENV=production` 也拒绝启动 |
 | `RULES_STORE_PATH` | 规则预设 JSON 文件路径；未设置时使用 `data/rule-presets.json` |
 | `RENDER_TOKEN` / `RENDER_SERVICE_URL` | 程序化排版 API 鉴权与 Node 渲染服务地址 |
 | `RENDER_PORT` / `RULES_API_ORIGIN` / `ASSET_ORIGIN` / `RENDER_BUILD_SHA` | renderer 的端口、规则 API、素材域名和可追溯构建 SHA；生产由流水线生成 `render-service.env`（排版接口的 `fbif-render-layout` 读同一份，端口由单元固定 `LAYOUT_PORT=19098`） |

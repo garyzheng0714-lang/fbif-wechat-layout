@@ -1326,7 +1326,7 @@ const clearRenderedImport = () => {
 let feishuDocImport = null;
 window.fetchArticle = createUrlImportHandler({
   documentRef: document,
-  fetchImpl: fetch,
+  fetchImpl: authSession.authFetch,
   getAccountID: () => activeRulePack.id,
   errorMessage: foodTalksFetchErrorMessage,
   importText: importClipboardText,

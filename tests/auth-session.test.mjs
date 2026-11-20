@@ -3,6 +3,7 @@ import test from 'node:test';
 import { parseHTML } from 'linkedom';
 
 import {
+  authFetch,
   ensureAuthenticatedSession,
   feishuGrantURL,
   loadCurrentUser,
@@ -284,19 +285,21 @@ async function returnToTab(status) {
   windowRef.addEventListener = (name, fn) => { handlers[name] = fn; };
   windowRef.removeEventListener = () => {};
   let calls = 0;
+  const urls = [];
   watchLoginOnReturn({
     windowRef,
     documentRef,
-    fetchImpl: async () => { calls += 1; return jsonResponse({}, status); },
+    fetchImpl: async (url) => { calls += 1; urls.push(url); return jsonResponse({}, status); },
   });
   handlers.visibilitychange();
   await new Promise((resolve) => setTimeout(resolve, 0));
-  return { assigned, get calls() { return calls; }, handlers };
+  return { assigned, urls, get calls() { return calls; }, handlers };
 }
 
-test('切回标签页：401 去登录', async () => {
-  const { assigned, calls } = await returnToTab(401);
+test('切回标签页：问登录中心的 /api/me（顺带续上登录），401 去登录', async () => {
+  const { assigned, calls, urls } = await returnToTab(401);
   assert.equal(calls, 1);
+  assert.deepEqual(urls, ['/api/me']);
   assert.deepEqual(assigned, [`/auth/login?next=${encodeURIComponent('/mp/fbif?account=legacy')}`]);
 });
 
@@ -320,4 +323,23 @@ test('pageshow 只有从缓存还原才查', async () => {
   handlers.pageshow({ persisted: true });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(tab.calls, 2);
+});
+
+test('接口回 401（登录过期、别处退出）：去登录、回到这一页，调用方不往下走', async () => {
+  const { windowRef, assigned } = locationRef();
+  let settled = false;
+  authFetch('/api/rules/presets', {}, { windowRef, fetchImpl: async () => jsonResponse({ error: 'login_required' }, 401) })
+    .then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(settled, false);
+  assert.deepEqual(assigned, [`/auth/login?next=${encodeURIComponent('/mp/fbif?account=legacy')}`]);
+});
+
+test('接口回 403、200 照常交给调用方，不去登录', async () => {
+  const { windowRef, assigned } = locationRef();
+  for (const status of [200, 403, 503]) {
+    const response = await authFetch('/api/x', {}, { windowRef, fetchImpl: async () => jsonResponse({}, status) });
+    assert.equal(response.status, status);
+  }
+  assert.deepEqual(assigned, []);
 });

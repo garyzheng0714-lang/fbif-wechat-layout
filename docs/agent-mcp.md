@@ -46,7 +46,7 @@ Markdown 的写法：开头一行 `# 标题` 是文章标题，`##` 起是小标
 
 **怎么运转**
 
-- 授权：`api/internal/mcpauth`，本服务自己当授权服务器（MCP 授权规范 2026-07-28），认人走统一登录。
+- 授权：`api/internal/mcpauth`，本服务自己当授权服务器（MCP 授权规范 2026-07-28），授权页认人走入口统一登录（`X-FBIF-User`）；`/mcp`、`/oauth/token|register|revoke`、元数据不过入口，每次调用查账号状态和 7 天内经入口来过（`agentCheck`）。
   - 元数据：`/.well-known/oauth-protected-resource`、`/.well-known/oauth-authorization-server`。
   - 授权与令牌：`/oauth/authorize`、`/oauth/token`、`/oauth/register`、`/oauth/revoke`。
   - 授权记录存 `agent-grants.json`（和用户库同一个目录），令牌只存哈希。

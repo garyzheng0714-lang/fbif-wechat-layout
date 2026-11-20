@@ -18,12 +18,13 @@
    ```bash
    PARITY_OUT=/tmp/layout-parity/new node tools/layout-parity/server.mjs
    ```
-2. 起一个空库的本地排版工具，**端口必须是 19191**（模板用页面域名补全 `/assets` 图，样稿和测试都按这个地址；换端口所有样稿都变）。登录用本地开发登录（与 e2e 同一个，`-tags devlogin` + `AUTH_DEV_LOGIN=true`，生产编译里没有）：
+2. 起一个空库的本地排版工具，**端口必须是 19191**（模板用页面域名补全 `/assets` 图，样稿和测试都按这个地址；换端口所有样稿都变）。Go 跑在 19193，前面用 feishu-login-guide 技能自带的假入口占 19191（顶替线上入口，把「这是谁」写进 `X-FBIF-User`）：
    ```bash
-   cd api && AUTH_DEV_LOGIN=true AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests RULES_STORE_PATH=/tmp/layout-parity/rules.json WECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:19192/api/oss-upload go run -tags devlogin . -port 19191
+   cd api && AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests RULES_STORE_PATH=/tmp/layout-parity/rules.json WECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:19192/api/oss-upload go run . -port 19193
+   python3 ~/.claude/skills/feishu-login-guide/templates/gateway/dev-gateway.py --app 19193 --port 19191 --name e2e --account
    ```
    空库启动会写入内置规则，样稿就是按内置规则排的；规则库里有手改过的规则就不是同一份答案。
-3. 用 Claude 内置浏览器打开 `http://127.0.0.1:19191`，先在页面控制台登录：`await fetch('/auth/dev-login', { method: 'POST', body: JSON.stringify({ username: 'e2e' }) })`，再刷新。**不要用 Playwright**。
+3. 用 Claude 内置浏览器打开 `http://127.0.0.1:19191`，假入口已经当你登录了。**不要用 Playwright**。
 4. 每一篇单独开一次页面（上一篇的本篇状态会留在本地存储里，必须清掉）。一篇三步：
    ```js
    // ① 清本地存储（并让这一页别再写回去）

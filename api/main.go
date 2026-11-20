@@ -103,7 +103,7 @@ func main() {
 		log.Fatalf("规则库校验失败：%v", err)
 	}
 
-	// 登录走 FBIF 统一登录、调飞书用本人授权（auth_login.go）；飞书授权的后台续期只支持单实例，部署是原地重启。
+	// 谁在用只读入口给的 X-FBIF-User、调飞书用本人授权（auth_login.go）；飞书授权的后台续期只支持单实例，部署是原地重启。
 	authService, err := newRuntimeAuthService(context.Background(), *rulesPath)
 	if err != nil {
 		log.Fatalf("登录服务启动失败：%v", err)
@@ -223,7 +223,7 @@ func main() {
 	mux.HandleFunc("/api", handleUnknownAPI)
 	mux.HandleFunc("/api/", handleUnknownAPI)
 
-	registerChannelRoutes(mux, publicDir, authService.Page)
+	registerChannelRoutes(mux, publicDir)
 
 	// Root → /mp/fbif (portal removed; landing goes straight to the WeChat editor)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,7 @@ func main() {
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 	shutdownHook := func(ctx context.Context) error {
-		return errors.Join(publishPipe.shutdownWorkers(ctx), authService.Shutdown(ctx))
+		return publishPipe.shutdownWorkers(ctx)
 	}
 	if err := serveUntilShutdown(shutdownSignal, srv, shutdownHook); err != nil {
 		log.Fatal(err)
@@ -1903,14 +1903,14 @@ func convertViaLibreOffice(ctx context.Context, baseURL, token string, docBytes 
 //	/ft 系列 serve site.html（网站工具）
 //	/app, /app.html 兼容 serve app.html；/site.html serve site.html
 //
-// 都套 page：没登录打开当场跳去登录（飞书里走飞书登录），不先把页面发下来，就不会先闪一下「未登录」。
+// 没登录打开由入口（Caddy 问登录中心）当场跳去登录，不先把页面发下来；这里不再判。
 // 路径下的 channel/packId 解析由前端 JS 完成（rule-packs/url.js）。
-func registerChannelRoutes(mux *http.ServeMux, publicDir string, page func(http.Handler) http.Handler) {
+func registerChannelRoutes(mux *http.ServeMux, publicDir string) {
 	serveFile := func(filename string) http.Handler {
-		return page(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, filepath.Join(publicDir, filename))
-		}))
+		})
 	}
 	serveApp := serveFile("app.html")
 	serveSite := serveFile("site.html")

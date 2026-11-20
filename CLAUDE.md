@@ -124,7 +124,7 @@
 - 只有 `main` 一个分支（2026-10-08 用户裁定）：禁止建分支/PR 分支，改动本地跑完 Go/Node 全测后直接提交推 `main`（即触发 deploy）。未合并的旧工作已存为 tag `archive/codex-unify-punctuation`、`archive/su-design-migration`。
 - 仓库公开（2026-11-12 用户定，为了 Actions 免费）：代码、全部历史和 Actions 日志谁都能看；密钥只在中台和 GitHub Secrets、日志只打印变量名，测试数据只用已公开发表的内容，不放客户名单、内部表格数据和真实账号。
 - 运行见 [README](README.md)。生产缺 `RULE_SUPER_ADMIN_OPEN_IDS` 必须启动失败；推 `main` 触发 deploy；四个入口（`/`、index/app/version）须 `no-cache`；改权限后验 `/api/auth/me`。
-- 登录走 FBIF 统一登录：`api/internal/auth`、`api/internal/feishugrant` 原样复制不改，接线只在 `api/auth_login.go`；本项目没有登录页、不收密码；改了登录接线跑 `tools/sso-conformance.sh`，全过才能上线。细则 §登录
+- 登录由入口统一拦截（FBIF 统一登录 v5）：Go 只读 `X-FBIF-User`（`api/internal/login`）、飞书授权用 `api/internal/feishugrant`，两份模板原样复制不改，接线只在 `api/auth_login.go`；不过登录的路径只写在 `deploy/caddy/fbifmp-layout.caddy` 的 `import fbif_login` 前和 `programPathPrefixes` 这一张单子里。细则 §登录
 - 只写当前行为；偏好标来源/日期/状态。`behavior` 仅限署名/来源、Mote 图、原创/转载页脚，禁任意 JS。
 - 复制禁导航；后台工作不得塞进按钮或改成准备态。
 - URL/DOCX/复制须有测试；新解析规则跑 Go/Node 全测并以真实浏览器验样例。

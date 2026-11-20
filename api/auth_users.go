@@ -1,7 +1,7 @@
 package main
 
 // auth_users.go — 排版工具自己的用户库（auth-users.json）：只记「这个人是谁、什么角色、停没停用」。
-// 登录会话归统一登录模板（sso-sessions.json），飞书授权归授权模板（feishu-grants.json），这里都不存。
+// 登录归入口和 FBIF 登录中心（本项目不存会话），飞书授权归授权模板（feishu-grants.json），这里都不存。
 
 import (
 	"encoding/json"
@@ -48,7 +48,8 @@ type authUser struct {
 	FeishuUnionID string    `json:"feishu_union_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-	LastLoginAt   time.Time `json:"last_login_at,omitempty"`
+	// LastLoginAt 是最近一次经入口来过（每小时最多记一次）；智能体按它判断这个人还在不在（auth_login.go agentCheck）。
+	LastLoginAt time.Time `json:"last_login_at,omitempty"`
 }
 
 type authUserDocument struct {
@@ -202,11 +203,15 @@ func (s *authUserStore) Upsert(user authUser) error {
 	return s.saveLocked(doc)
 }
 
-// RecordLogin 把统一登录的人对上用户库并记下这次登录，返回库里的那一条：
+// visitRecordEvery：同一个人资料没变时，最近一次来过（last_login_at）最多这么久写一次盘。
+const visitRecordEvery = time.Hour
+
+// RecordVisit 把入口给的人对上用户库，返回库里的那一条（每个带人的请求都调）：
 // 飞书登录的人先按 union_id 认（换统一登录前的老用户 ID 是 feishu:<open_id>，ID、角色、停用都跟着走），
-// 认不出再按 ID 认，都没有就新建。资料（名字、头像、邮箱）以这次登录为准，空的不覆盖。
-func (s *authUserStore) RecordLogin(login authUser, now time.Time) (authUser, error) {
-	if strings.TrimSpace(login.ID) == "" {
+// 认不出再按 ID 认，都没有就新建。资料（名字、头像、邮箱）以这次为准，空的不覆盖；
+// LastLoginAt 记「最近一次经入口来过」，资料没变、一小时内记过就不写盘。
+func (s *authUserStore) RecordVisit(visit authUser, now time.Time) (authUser, error) {
+	if strings.TrimSpace(visit.ID) == "" {
 		return authUser{}, errors.New("auth user id is required")
 	}
 	now = now.UTC()
@@ -217,7 +222,7 @@ func (s *authUserStore) RecordLogin(login authUser, now time.Time) (authUser, er
 		return authUser{}, err
 	}
 	match := -1
-	if union := strings.TrimSpace(login.FeishuUnionID); union != "" && login.AuthMode == authModeFeishu {
+	if union := strings.TrimSpace(visit.FeishuUnionID); union != "" && visit.AuthMode == authModeFeishu {
 		for idx := range doc.Users {
 			if doc.Users[idx].AuthMode == authModeFeishu && doc.Users[idx].FeishuUnionID == union {
 				match = idx
@@ -227,31 +232,36 @@ func (s *authUserStore) RecordLogin(login authUser, now time.Time) (authUser, er
 	}
 	if match < 0 {
 		for idx := range doc.Users {
-			if doc.Users[idx].ID == login.ID {
+			if doc.Users[idx].ID == visit.ID {
 				match = idx
 				break
 			}
 		}
 	}
 	if match < 0 {
-		login.LastLoginAt = now
-		login = normalizeAuthUser(login, nil, now)
-		doc.Users = append(doc.Users, login)
-		return login, s.saveLocked(doc)
+		visit.LastLoginAt = now
+		visit = normalizeAuthUser(visit, nil, now)
+		doc.Users = append(doc.Users, visit)
+		return visit, s.saveLocked(doc)
 	}
 	user := doc.Users[match]
+	changed := user.AuthMode != visit.AuthMode
 	for _, field := range []struct {
 		dst *string
 		src string
 	}{
-		{&user.Name, login.Name}, {&user.AvatarURL, login.AvatarURL}, {&user.Email, login.Email},
-		{&user.CompanyCode, login.CompanyCode}, {&user.FeishuUnionID, login.FeishuUnionID},
+		{&user.Name, visit.Name}, {&user.AvatarURL, visit.AvatarURL}, {&user.Email, visit.Email},
+		{&user.CompanyCode, visit.CompanyCode}, {&user.FeishuUnionID, visit.FeishuUnionID},
 	} {
-		if v := strings.TrimSpace(field.src); v != "" {
+		if v := strings.TrimSpace(field.src); v != "" && v != *field.dst {
 			*field.dst = v
+			changed = true
 		}
 	}
-	user.AuthMode = login.AuthMode
+	if !changed && !user.LastLoginAt.IsZero() && now.Sub(user.LastLoginAt) < visitRecordEvery {
+		return user, nil
+	}
+	user.AuthMode = visit.AuthMode
 	user.LastLoginAt = now
 	user.UpdatedAt = now
 	doc.Users[match] = user

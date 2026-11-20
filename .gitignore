@@ -32,8 +32,6 @@ docs/*
 !docs/agent-mcp.md
 # 红线细则：CLAUDE.md 每条「细则 §X」指向这里，必须随仓库走
 !docs/redlines.md
-# 统一登录合规测试结果：上线前全过的凭据（tools/sso-conformance.sh 生成）
-!docs/sso-conformance.json
 # 跨系统接口约定：资讯订阅照它们对接，必须随仓库走
 !docs/publish-intake-contract.md
 !docs/publish-status-callback.md

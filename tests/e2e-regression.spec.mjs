@@ -7,6 +7,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 import path from 'path';
 import fs from 'fs';
 
@@ -31,13 +32,11 @@ const RESULTS = [];
 
 async function newAuthenticatedContext(browser, options = {}) {
   const context = await browser.newContext(options);
-  const response = await context.request.post(`${BASE}/auth/dev-login`, {
-    data: { username: E2E_USERNAME },
-  });
-  if (!response.ok()) {
-    const body = await response.text();
+  try {
+    await loginAs(context, { username: E2E_USERNAME });
+  } catch (error) {
     await context.close();
-    throw new Error(`E2E 登录失败（${response.status()}）：${body}`);
+    throw error;
   }
   return context;
 }

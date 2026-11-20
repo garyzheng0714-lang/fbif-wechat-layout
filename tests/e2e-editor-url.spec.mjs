@@ -1,13 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const E2E_USERNAME = 'e2e';
 
 async function login(page) {
-  const response = await page.request.post(`${BASE}/auth/dev-login`, {
-    data: { username: E2E_USERNAME },
-  });
-  expect(response.ok(), `E2E 登录失败（${response.status()}）`).toBeTruthy();
+  await loginAs(page.context(), { username: E2E_USERNAME });
 }
 
 test('公众号和网站入口地址栏不带构建号，旧收藏打开后也会清掉', async ({ page }) => {

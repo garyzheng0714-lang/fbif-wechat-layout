@@ -29,20 +29,15 @@ test('Caddy vhost overrides no-cache headers for cacheable assets', async () => 
 
 // WHY：新增 Go API 不应再依赖人工白名单；/api 统一交给 Go，签名预览仍是
 // 非 API 的显式路由。两者都必须在 SPA fallback 前，避免返回 index.html 假 200。
-test('Caddy vhost routes publishing APIs and previews before the SPA fallback', async () => {
+test('Caddy sends signed previews to Go without login and everything else to Go behind the login gateway', async () => {
   const vhost = await readFile(new URL('../deploy/caddy/fbifmp-layout.caddy', import.meta.url), 'utf8');
-  const matcherAt = vhost.indexOf('@fbifPublish path /preview/*');
-  const proxyAt = vhost.indexOf('handle @fbifPublish');
-  const apiMatcherAt = vhost.indexOf('@fbifAPI path /api /api/*');
-  const apiProxyAt = vhost.indexOf('handle @fbifAPI');
-  const fallbackAt = vhost.indexOf('\n\thandle {');
-
-  assert.ok(matcherAt >= 0, '签名预览路由必须显式登记');
-  assert.ok(proxyAt > matcherAt, '预览路由 matcher 后必须存在 reverse_proxy handle');
-  assert.ok(apiMatcherAt >= 0 && apiProxyAt > apiMatcherAt, '全部 API 必须交给 Go 统一处理');
-  assert.match(vhost.slice(proxyAt, fallbackAt), /reverse_proxy localhost:9001/);
-  assert.match(vhost.slice(apiProxyAt, fallbackAt), /reverse_proxy localhost:9001/);
-  assert.ok(fallbackAt > proxyAt && fallbackAt > apiProxyAt, '发布路由必须位于 SPA 静态兜底之前');
+  const program = vhost.match(/@fbifProgram path (.+)\n/);
+  assert.ok(program && program[1].split(/\s+/).includes('/preview/*'), '签名预览路由必须显式登记为不过登录');
+  const proxyAt = vhost.indexOf('handle @fbifProgram');
+  const gatewayAt = vhost.indexOf('import fbif_login 127.0.0.1:9001');
+  assert.ok(proxyAt > 0 && gatewayAt > proxyAt, '预览路由必须写在入口拦截前');
+  assert.match(vhost.slice(proxyAt, gatewayAt), /reverse_proxy 127\.0\.0\.1:9001/);
+  assert.doesNotMatch(vhost, /^\thandle \{/m, '不再有静态兜底：/api 和页面都经入口交给 Go，未知 API 由 Go 回 JSON 404');
 });
 
 // 2026-10-28 用户：「这个网站打开会闪一下。很恶心。」逐帧录下来是三处：
@@ -52,7 +47,7 @@ test('Caddy vhost routes publishing APIs and previews before the SPA fallback', 
 // ③ 恢复上次的稿子时放了「新文章出现」的渐入。
 test('Caddy serves unversioned CSS and JS with no-cache so editors never need to rewrite their hrefs', async () => {
   const vhost = await readFile(new URL('../deploy/caddy/fbifmp-layout.caddy', import.meta.url), 'utf8');
-  assert.match(vhost, /@static path \*\.css \*\.js\s+header @static Cache-Control "no-cache"/);
+  assert.match(vhost, /@fbifStaticCode path \*\.css \*\.js\s+header @fbifStaticCode Cache-Control "no-cache"/);
 });
 
 for (const page of ['app.html', 'site.html']) {

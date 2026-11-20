@@ -11,6 +11,7 @@
 // 飞书上游 API 由服务端调用且 base URL 硬编码，本地无凭据，因此这里打桩的是本工具
 // 自己的 /api/feishu/* 响应；服务端 job 管理器本身由 api/feishu_export_jobs_test.go 覆盖。
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 import JSZip from 'jszip';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
@@ -91,8 +92,7 @@ test('飞书导入走异步作业：真实分阶段进度推进，正文与图�
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const loginResponse = await context.request.post(`${BASE}/auth/dev-login`, { data: LOGIN });
-  expect(loginResponse.ok(), 'E2E 登录必须成功').toBeTruthy();
+  await loginAs(context, LOGIN);
   const page = await context.newPage();
 
   const calls = [];

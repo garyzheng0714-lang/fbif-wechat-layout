@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -15,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"fbif-wechat-layout/api/internal/auth"
 	"fbif-wechat-layout/api/internal/feishugrant"
+	"fbif-wechat-layout/api/internal/login"
 )
 
 type fakeFeishuProvider struct {
@@ -120,7 +121,7 @@ func registerTestAuthMux(service *authService) *http.ServeMux {
 }
 
 // mustSessionForUser 把人放进用户库，返回他的用户 ID：测试里请求上的人由 requestWithSession 直接放进 context，
-// 生产里是统一登录模板认出来再放（auth_login.go 的 wrap）。
+// 生产里是 auth_login.go 的 Wrap 读入口给的 X-FBIF-User 再放。
 func mustSessionForUser(t *testing.T, service *authService, user authUser) string {
 	t.Helper()
 	if err := service.users.Upsert(user); err != nil {
@@ -252,7 +253,39 @@ func TestFeishuGrantRequiredIsReportedForUngrantedUser(t *testing.T) {
 	}
 }
 
-func TestOnLoginKeepsLegacyFeishuUsersAndRoles(t *testing.T) {
+// fbifUserHeader 造入口给的 X-FBIF-User：JSON 再 base64url（不带 =）。
+func fbifUserHeader(t *testing.T, u login.User) string {
+	t.Helper()
+	raw, err := json.Marshal(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// wrappedMe 经 Wrap 调「我是谁」：header 为空就当请求上没带人。
+func wrappedMe(t *testing.T, service *authService, path, header string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := registerTestAuthMux(service)
+	mux.HandleFunc("POST /api/publish/site-sync", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"layout_user": layoutUserID(r.Context()), "header": r.Header.Get(login.Header)})
+	})
+	method := http.MethodGet
+	if path == "/api/publish/site-sync" {
+		method = http.MethodPost
+	}
+	req := httptest.NewRequest(method, path, nil)
+	if header != "" {
+		req.Header.Set(login.Header, header)
+	}
+	rec := httptest.NewRecorder()
+	service.Wrap(mux).ServeHTTP(rec, req)
+	return rec
+}
+
+// 入口给的人对上用户库：老用户（feishu:<open_id>）按 union_id 认回原来的编号、角色和 open_id；
+// 新同事、账号密码登录的人按头上的 id 建；停用的 403（不回 401，免得去登录又回来来回跳）。
+func TestGatewayUserKeepsLegacyUsersAndRoles(t *testing.T) {
 	service := newTestAuthService(t, &fakeFeishuProvider{})
 	if err := service.users.Upsert(authUser{
 		ID: "feishu:ou_admin", Name: "旧名字", AuthMode: authModeFeishu, Status: authUserActive,
@@ -265,39 +298,96 @@ func TestOnLoginKeepsLegacyFeishuUsersAndRoles(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-
-	id, err := service.onLogin(ctx, auth.Identity{CompanyCode: fbifCompanyCode, Sub: "on_admin", Name: "新名字", Picture: "https://example.test/a.png"})
-	if err != nil || id != "feishu:ou_admin" {
-		t.Fatalf("老用户要按 union_id 认回原来的 ID：id=%q err=%v", id, err)
-	}
-	user, _, _ := service.users.Get(id)
-	if user.Role != authRoleAdmin || user.Name != "新名字" || user.CompanyCode != fbifCompanyCode || user.FeishuOpenID != "ou_admin" || user.LastLoginAt.IsZero() {
-		t.Fatalf("登录要更新资料、保留角色和 open_id：%+v", user)
+	me := func(header string) (int, authPublicUser) {
+		rec := wrappedMe(t, service, "/api/auth/me", header)
+		var body struct {
+			User authPublicUser `json:"user"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		return rec.Code, body.User
 	}
 
-	if _, err := service.onLogin(ctx, auth.Identity{CompanyCode: fbifCompanyCode, Sub: "on_gone", Name: "停用的人"}); !errors.Is(err, auth.ErrNotAllowed) {
-		t.Fatalf("停用的人不能登录：err=%v", err)
+	code, user := me(fbifUserHeader(t, login.User{ID: fbifCompanyCode + ":on_admin", Name: "新名字", AvatarURL: "https://example.test/a.png", CompanyCode: fbifCompanyCode}))
+	if code != http.StatusOK || user.ID != "feishu:ou_admin" || user.Role != string(authRoleAdmin) || user.Name != "新名字" {
+		t.Fatalf("老用户要按 union_id 认回原来的 ID 和角色：%d %+v", code, user)
+	}
+	stored, _, _ := service.users.Get("feishu:ou_admin")
+	if stored.CompanyCode != fbifCompanyCode || stored.FeishuOpenID != "ou_admin" || stored.LastLoginAt.IsZero() {
+		t.Fatalf("要更新资料、保留 open_id、记下来过：%+v", stored)
 	}
 
-	id, err = service.onLogin(ctx, auth.Identity{CompanyCode: fbifCompanyCode, Sub: "on_new", Name: "新同事"})
-	if err != nil || id != fbifCompanyCode+":on_new" {
-		t.Fatalf("新同事：id=%q err=%v", id, err)
-	}
-	if user, _, _ := service.users.Get(id); user.AuthMode != authModeFeishu || user.FeishuUnionID != "on_new" || user.Role != authRoleUser {
-		t.Fatalf("新同事记录：%+v", user)
+	if code, _ := me(fbifUserHeader(t, login.User{ID: fbifCompanyCode + ":on_gone", Name: "停用的人", CompanyCode: fbifCompanyCode})); code != http.StatusForbidden {
+		t.Fatalf("本项目停用的人要 403：%d", code)
 	}
 
-	id, err = service.onLogin(ctx, auth.Identity{CompanyCode: accountCompanyCode, Sub: "recVendor", Name: "vendor"})
-	if err != nil || id != "account:recVendor" {
-		t.Fatalf("账号密码登录：id=%q err=%v", id, err)
+	code, user = me(fbifUserHeader(t, login.User{ID: fbifCompanyCode + ":on_new", Name: "新同事", CompanyCode: fbifCompanyCode}))
+	if code != http.StatusOK || user.ID != fbifCompanyCode+":on_new" || user.AuthMode != string(authModeFeishu) || user.Role != string(authRoleUser) {
+		t.Fatalf("新同事：%d %+v", code, user)
 	}
-	if user, _, _ := service.users.Get(id); user.AuthMode != authModePassword || feishuAppFor(user.ID) != "" {
-		t.Fatalf("账号密码登录的人不能授权飞书：%+v", user)
+	if stored, _, _ := service.users.Get(fbifCompanyCode + ":on_new"); stored.FeishuUnionID != "on_new" {
+		t.Fatalf("新同事要记 union_id：%+v", stored)
+	}
+
+	code, user = me(fbifUserHeader(t, login.User{ID: "account:recVendor", Name: "vendor", CompanyCode: accountCompanyCode, Apps: []string{"layout"}}))
+	if code != http.StatusOK || user.ID != "account:recVendor" || user.AuthMode != string(authModePassword) || user.Feishu != "none" {
+		t.Fatalf("账号密码登录：%d %+v", code, user)
 	}
 
 	if app := feishuAppFor("FMZYRL01RNE:on_fude"); app != "" {
 		t.Fatalf("富的的人没有本项目的飞书应用，app=%q", app)
+	}
+}
+
+// 没有头 401、头不对 401、别的程序调的路径不看头（浏览器带来的也删掉）。
+func TestGatewayHeaderRequiredAndIgnoredOnProgramPaths(t *testing.T) {
+	service := newTestAuthService(t, &fakeFeishuProvider{})
+	if rec := wrappedMe(t, service, "/api/auth/me", ""); rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), `"login_url":"/auth/login"`) {
+		t.Fatalf("没有头要 401：%d %s", rec.Code, rec.Body)
+	}
+	if rec := wrappedMe(t, service, "/api/auth/me", "%%%"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("头不对要 401：%d %s", rec.Code, rec.Body)
+	}
+	forged := fbifUserHeader(t, login.User{ID: fbifCompanyCode + ":on_boss", Name: "冒充", CompanyCode: fbifCompanyCode})
+	rec := wrappedMe(t, service, "/api/publish/site-sync", forged)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "on_boss") {
+		t.Fatalf("别的程序调的路径不认头上的人：%d %s", rec.Code, rec.Body)
+	}
+	if users, _ := service.users.List(); len(users) != 0 {
+		t.Fatalf("不该记下冒充的人：%+v", users)
+	}
+	for _, path := range []string{"/api/health", "/api/feishu/card-callback", "/api/layout/v1/render", "/mcp", "/oauth/token", "/api/agent/uploads/x", "/preview/publish/1"} {
+		if !programPath(path) {
+			t.Fatalf("%s 应是别的程序调的路径", path)
+		}
+	}
+	for _, path := range []string{"/api/auth/me", "/oauth/authorize", "/auth/feishu-grant", "/api/agent/results/x", "/mp/fbif"} {
+		if programPath(path) {
+			t.Fatalf("%s 要登录，不能当别的程序的路径", path)
+		}
+	}
+}
+
+// 同一个人资料没变、一小时内来过就不写盘。
+func TestRecordVisitThrottlesWrites(t *testing.T) {
+	service := newTestAuthService(t, &fakeFeishuProvider{})
+	now := time.Unix(1_800_000_000, 0).UTC()
+	visit := authUser{ID: fbifCompanyCode + ":on_a", Name: "甲", AuthMode: authModeFeishu, FeishuUnionID: "on_a", CompanyCode: fbifCompanyCode}
+	first, err := service.users.RecordVisit(visit, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := service.users.RecordVisit(visit, now.Add(30*time.Minute))
+	if !second.LastLoginAt.Equal(first.LastLoginAt) {
+		t.Fatalf("一小时内不该再记：%v → %v", first.LastLoginAt, second.LastLoginAt)
+	}
+	visit.Name = "甲改名"
+	third, _ := service.users.RecordVisit(visit, now.Add(40*time.Minute))
+	if third.Name != "甲改名" || !third.LastLoginAt.Equal(now.Add(40*time.Minute)) {
+		t.Fatalf("资料变了要写：%+v", third)
+	}
+	fourth, _ := service.users.RecordVisit(visit, now.Add(2*time.Hour))
+	if !fourth.LastLoginAt.Equal(now.Add(2 * time.Hour)) {
+		t.Fatalf("过了一小时要记：%+v", fourth)
 	}
 }
 
@@ -307,15 +397,15 @@ func TestCheckGrantRequiresSamePersonAndRecordsOpenID(t *testing.T) {
 	userID := mustSessionForUser(t, service, authUser{
 		ID: fbifCompanyCode + ":on_boss", Name: "老板", CompanyCode: fbifCompanyCode, AuthMode: authModeFeishu, Status: authUserActive,
 	})
-	login := &auth.User{ID: userID, Identity: auth.Identity{CompanyCode: fbifCompanyCode, Sub: "on_boss"}}
+	visitor := login.User{ID: fbifCompanyCode + ":on_boss", CompanyCode: fbifCompanyCode}
 
-	if err := service.checkGrantUser(login, feishugrant.FeishuUser{OpenID: "ou_other", UnionID: "on_other"}); err == nil {
+	if err := service.checkGrantUser(userID, visitor, feishugrant.FeishuUser{OpenID: "ou_other", UnionID: "on_other"}); err == nil {
 		t.Fatalf("授权的飞书账号不是登录的人，必须拒绝")
 	}
-	if err := service.checkGrantUser(&auth.User{ID: "account:rec", Identity: auth.Identity{CompanyCode: accountCompanyCode, Sub: "on_boss"}}, feishugrant.FeishuUser{OpenID: "ou_boss", UnionID: "on_boss"}); err == nil {
+	if err := service.checkGrantUser("account:rec", login.User{ID: "account:on_boss", CompanyCode: accountCompanyCode}, feishugrant.FeishuUser{OpenID: "ou_boss", UnionID: "on_boss"}); err == nil {
 		t.Fatalf("账号密码登录的人不能拿别人的飞书授权")
 	}
-	if err := service.checkGrantUser(nil, feishugrant.FeishuUser{OpenID: "ou_boss", UnionID: "on_boss"}); err == nil {
+	if err := service.checkGrantUser("", login.User{}, feishugrant.FeishuUser{OpenID: "ou_boss", UnionID: "on_boss"}); err == nil {
 		t.Fatalf("没登录不能授权")
 	}
 	user, _, _ := service.users.Get(userID)
@@ -323,12 +413,18 @@ func TestCheckGrantRequiresSamePersonAndRecordsOpenID(t *testing.T) {
 		t.Fatalf("还没授权就不该认出超级管理员")
 	}
 
-	if err := service.checkGrantUser(login, feishugrant.FeishuUser{OpenID: "ou_boss", UnionID: "on_boss"}); err != nil {
+	if err := service.checkGrantUser(userID, visitor, feishugrant.FeishuUser{OpenID: "ou_boss", UnionID: "on_boss"}); err != nil {
 		t.Fatalf("同一个人授权：%v", err)
 	}
 	user, _, _ = service.users.Get(userID)
 	if user.FeishuOpenID != "ou_boss" || service.effectiveRole(user) != authRoleSuperAdmin {
 		t.Fatalf("授权后要记下 open_id、按名单认出超级管理员：%+v", user)
+	}
+
+	// 老用户（feishu:<open_id>）：授权按用户库编号存，union_id 照入口头上的 sub 核。
+	legacy := mustSessionForUser(t, service, authUser{ID: "feishu:ou_old", AuthMode: authModeFeishu, FeishuUnionID: "on_old", Status: authUserActive})
+	if err := service.checkGrantUser(legacy, login.User{ID: fbifCompanyCode + ":on_old", CompanyCode: fbifCompanyCode}, feishugrant.FeishuUser{OpenID: "ou_old2", UnionID: "on_old"}); err != nil {
+		t.Fatalf("老用户授权：%v", err)
 	}
 }
 
@@ -552,16 +648,30 @@ func TestFeishuGrantRequestsDocumentAndWikiScopes(t *testing.T) {
 	}
 }
 
-// 身份菜单的「接入智能体」（红线 51）：正式登录只给飞书登录的 FBIF 同事，和智能体每次调用查的是同一条。
+// 身份菜单的「接入智能体」（红线 51）：只给飞书登录的 FBIF 同事；智能体每次调用还要这个人 7 天内经入口进来过。
 func TestAgentCapabilityOnlyForFeishuColleagues(t *testing.T) {
-	var sso ssoLogin
-	colleague := authUser{ID: fbifCompanyCode + ":on_a", AuthMode: authModeFeishu, FeishuUnionID: "on_a", Status: authUserActive}
-	vendor := authUser{ID: "account:recVendor", AuthMode: authModePassword, Status: authUserActive}
-	noUnion := authUser{ID: fbifCompanyCode + ":on_b", AuthMode: authModeFeishu, Status: authUserActive}
-	if !sso.agentCapable(colleague) || sso.agentCapable(vendor) || sso.agentCapable(noUnion) {
-		t.Fatalf("colleague=%v vendor=%v noUnion=%v", sso.agentCapable(colleague), sso.agentCapable(vendor), sso.agentCapable(noUnion))
+	service := newTestAuthService(t, &fakeFeishuProvider{})
+	now := service.now()
+	colleague := authUser{ID: fbifCompanyCode + ":on_a", AuthMode: authModeFeishu, FeishuUnionID: "on_a", Status: authUserActive, LastLoginAt: now.Add(-time.Hour)}
+	vendor := authUser{ID: "account:recVendor", AuthMode: authModePassword, Status: authUserActive, LastLoginAt: now}
+	noUnion := authUser{ID: fbifCompanyCode + ":on_b", AuthMode: authModeFeishu, Status: authUserActive, LastLoginAt: now}
+	if !service.agentCapable(colleague) || service.agentCapable(vendor) || service.agentCapable(noUnion) {
+		t.Fatalf("colleague=%v vendor=%v noUnion=%v", service.agentCapable(colleague), service.agentCapable(vendor), service.agentCapable(noUnion))
 	}
-	if err := sso.agentCheck(context.Background(), vendor); err == nil || !strings.Contains(err.Error(), "飞书") {
+	if err := service.agentCheck(vendor); err == nil || !strings.Contains(err.Error(), "飞书") {
 		t.Fatalf("账号密码登录的不能接智能体：%v", err)
+	}
+	if err := service.agentCheck(colleague); err != nil {
+		t.Fatalf("近期来过的同事：%v", err)
+	}
+	gone := colleague
+	gone.LastLoginAt = now.Add(-agentSeenWithin - time.Hour)
+	if err := service.agentCheck(gone); err == nil || !strings.Contains(err.Error(), "/mp/fbif") {
+		t.Fatalf("7 天没经入口来过（离职的人进不来）就不替他干活：%v", err)
+	}
+	never := colleague
+	never.LastLoginAt = time.Time{}
+	if err := service.agentCheck(never); err == nil {
+		t.Fatal("从没经入口来过不能用")
 	}
 }

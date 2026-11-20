@@ -1,22 +1,33 @@
-// 登录走 FBIF 统一登录（后端 api/auth_login.go）：本项目没有登录页、不存令牌，会话只在 HttpOnly cookie 里。
-// 没登录时去 /auth/login?next=（飞书客户端里直接走飞书登录），后端再送去登录中心；登录完回到 next。
+// 登录由入口统一拦截（2026-11-20 起）：入口（Caddy）每个请求先问 FBIF 登录中心，没登录的页面由中心跳去登录、接口回 401；
+// /auth/*、/api/me 入口直接转给登录中心。本项目没有登录页、不存令牌，这里只管页面开着以后（照 feishu-login-guide 模板
+// web/fbif-user.ts，本项目前端不编译 TypeScript，所以照它写成 JS、和项目自己的「我是谁」/api/auth/me 合在这一处）：
+// - 调接口都走 authFetch：401（登录过期、在别处退出、离职被停）就去登录，登完回到这一页。
+// - 标签页切回来问一次登录中心的 /api/me（顺带续上登录），401 就去登录。
 // 飞书登录了还没授权云文档的，接着自动去授权（autoGrantFeishu）。
 
 import { openAgentConnect } from './agent-connect.js';
 
+// authFetch 调本项目接口都走它（模板的 api()）：401 时去登录，不往下走（返回的 Promise 不再落定）。
 export async function authFetch(input, init = {}, {
   fetchImpl = globalThis.fetch,
+  windowRef = globalThis.window,
 } = {}) {
-  return fetchImpl(input, {
+  const response = await fetchImpl(input, {
     ...init,
     credentials: 'same-origin',
   });
+  if (response.status === 401 && windowRef?.location) {
+    navigate(windowRef, loginURL(windowRef));
+    return new Promise(() => {});
+  }
+  return response;
 }
 
+// loadCurrentUser 读本项目的「我是谁」（角色、能力、飞书授权状态）；没登录回 null，由调用方去登录。
 export async function loadCurrentUser({
   fetchImpl = globalThis.fetch,
 } = {}) {
-  const response = await authFetch('/api/auth/me', { method: 'GET', cache: 'no-store' }, { fetchImpl });
+  const response = await fetchImpl('/api/auth/me', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
   if (response.status === 401) return null;
   if (!response.ok) {
     throw new Error('账号服务暂不可用');
@@ -39,7 +50,7 @@ function inFeishu(windowRef) {
   return /Lark|Feishu/i.test(String(windowRef?.navigator?.userAgent || ''));
 }
 
-// loginURL 是没登录时去的地方：浏览器里去登录中心（账号密码、飞书都在那页），飞书客户端里直接走飞书登录、不用点。
+// loginURL 是没登录时去的地方（都由登录中心处理）：浏览器里去登录页（账号密码、飞书都在那页），飞书客户端里直接走飞书免登、不用点。
 export function loginURL(windowRef = globalThis.window) {
   const start = inFeishu(windowRef) ? '/auth/feishu/fbif/login' : '/auth/login';
   return `${start}?next=${encodeURIComponent(currentReturnTo(windowRef))}`;
@@ -99,7 +110,7 @@ function autoGrantFeishu(windowRef, user) {
   return true;
 }
 
-// 已打开的标签页切回来时查一次登录：别处退出后，这里不用等用户点什么才发现。
+// 已打开的标签页切回来时问一次登录中心的 /api/me（入口直接转给中心，顺带续上登录）：别处退出后，这里不用等用户点什么才发现。
 // 只在 visibilitychange（变可见）和 pageshow（整页从缓存还原）时各问一次，不轮询；
 // 只有 401 才跳登录，断网、超时、5xx 都当没发生；上一次还没回来就不再发。返回卸载函数。
 export function watchLoginOnReturn({
@@ -113,7 +124,7 @@ export function watchLoginOnReturn({
     if (inflight) return;
     inflight = true;
     try {
-      const response = await authFetch('/api/auth/me', { method: 'GET', cache: 'no-store' }, { fetchImpl });
+      const response = await fetchImpl('/api/me', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
       if (response.status === 401) navigate(windowRef, loginURL(windowRef));
     } catch {
       // 断网、超时：不能当没登录
@@ -159,10 +170,11 @@ export async function ensureAuthenticatedSession({
   }
 }
 
+// logoutSession 退出（登录中心处理）：这个浏览器里经飞书登的，别的项目也一起退出。
 export async function logoutSession({
   fetchImpl = globalThis.fetch,
 } = {}) {
-  await authFetch('/auth/feishu/logout', { method: 'POST' }, { fetchImpl });
+  await fetchImpl('/auth/feishu/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => undefined);
 }
 
 function makeAvatar(documentRef, user, large = false) {

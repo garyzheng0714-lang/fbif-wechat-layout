@@ -4,6 +4,7 @@
 // 饱和蓝粗条。DOM/CSS 层的契约由 tests/import-progress-component.test.mjs 守；这里验
 // 真实渲染下的几何、状态与无障碍表现——这些只有真跑浏览器才看得见。
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const LOGIN = { username: 'e2e', name: 'E2E 测试账号' };
@@ -13,8 +14,7 @@ async function shell(browser, { width = 1440, reducedMotion } = {}) {
     viewport: { width, height: 900 },
     ...(reducedMotion ? { reducedMotion: 'reduce' } : {}),
   });
-  const login = await context.request.post(`${BASE}/auth/dev-login`, { data: LOGIN });
-  expect(login.ok(), 'E2E 登录必须成功').toBeTruthy();
+  await loginAs(context, LOGIN);
   const page = await context.newPage();
   await page.goto(`${BASE}/mp/fbif`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => (

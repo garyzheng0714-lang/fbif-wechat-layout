@@ -4,6 +4,7 @@
  * 文章载体的排版与复制保持原样；切换不重新导入，刷新、切账号都留在用户选的载体。
  */
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 
 const BASE = `http://127.0.0.1:${Number(process.env.E2E_PORT || 19090)}`;
 const E2E_USERNAME = 'e2e';
@@ -16,10 +17,7 @@ async function newAuthenticatedContext(browser) {
     viewport: { width: 1440, height: 900 },
     permissions: ['clipboard-read', 'clipboard-write'],
   });
-  const resp = await context.request.post(`${BASE}/auth/dev-login`, {
-    data: { username: E2E_USERNAME },
-  });
-  if (!resp.ok()) throw new Error(`E2E 登录失败（${resp.status()}）：${await resp.text()}`);
+  await loginAs(context, { username: E2E_USERNAME });
   return context;
 }
 

@@ -1,12 +1,16 @@
 # fbifmp-layout.foodtalks.cn — 排版工具站点 Caddy vhost（声明式，架构体检 S4）
 #
 # 本文件是该站点路由的唯一真相源：仓库改这里 → 部署 rsync 到
-# /etc/caddy/sites/fbifmp-layout.caddy → caddy validate 通过才 reload。
-# 服务器主 Caddyfile（15 个站点共用）只保留一行 `import sites/fbifmp-layout.caddy`，
-# 本项目部署不再对主文件做注入式 patch（旧脚本曾因此连修 6 次路由）。
+# /etc/caddy/sites/fbifmp-layout.caddy → 和登录中心的入口片段一起 caddy validate 通过才 reload。
+# 服务器主 Caddyfile（多个站点共用）开头 import 登录中心的片段 /etc/caddy/snippets/fbif-login.caddy，
+# 再 `import sites/fbifmp-layout.caddy`；本项目部署不对主文件做注入式 patch。
 #
-# /api 全部交给 Go 9001，未知 API 由 Go 统一返回 JSON 404，
-# 绝不落到 SPA 静态 fallback 形成 HTML 假 200。
+# 登录由入口统一拦截（FBIF 统一登录 v5，2026-11-20 起）：最后一行 import fbif_login，每个请求先问登录中心，
+# 登了把「这是谁」写进 X-FBIF-User 交给 Go 9001；没登录的页面由中心跳去登录，接口回 401；
+# /auth/*、/api/me 由入口直接转给中心。本项目不写登录代码（api/auth_login.go 只读这个头）。
+# 写在 import 前面的 handle 不过登录（handle 按写的顺序先匹配），一律删掉浏览器带来的 X-FBIF-User。
+#
+# /api 全部交给 Go 9001，未知 API 由 Go 统一返回 JSON 404，不落到静态文件形成 HTML 假 200。
 # 9000 的旧 Python 程序只留给 Go 本机转存图片，不对公网（2026-11-09 安全审计摘掉
 # /api/wechat-draft、/api/oss-presign：它只看 Origin/Referer，能被伪造）。
 
@@ -18,7 +22,7 @@ fbifmp-layout.foodtalks.cn {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	# ?：Go 自己给了就不改（没登录打开页面那次 302 是 no-store，不能被改成 no-cache）
+	# ?：Go 或登录中心自己给了就不改（没登录打开页面那次 302 是 no-store，不能被改成 no-cache）
 	@fbifAppShell path / /index.html /app.html /site.html /distribute.html /version.json
 	header @fbifAppShell ?Cache-Control "no-cache"
 
@@ -34,45 +38,16 @@ fbifmp-layout.foodtalks.cn {
 	@fbifImageAssets path *.png *.jpg *.jpeg *.webp *.gif *.svg *.ico
 	header @fbifImageAssets >Cache-Control "public, max-age=86400"
 
-	# 页面都交给 Go：没登录打开当场 302 去登录（不先发页面、不闪「未登录」）；/ 由 Go 跳 /mp/fbif。
-	# distribute.html（带签名、飞书侧边栏打开）、footer.html 这些公开页面不在这里，照旧由下面的静态文件发。
-	@fbifChannels path / /index.html /app /app.html /site.html /mp /mp/* /ft /ft/*
-	handle @fbifChannels {
-		reverse_proxy localhost:9001
-	}
-
-	# 发布流水线（M4-M7）：审核预览页 + 任务管理 API + 飞书卡片回调。
-	# FEISHU_CALLBACK_MODE=websocket 时 API 对公网 Webhook 精确返回 404；只有显式
-	# webhook 模式才开放该 POST 端点，两种传输层不再同时可用。
-	@fbifPublish path /preview/*
-	handle @fbifPublish {
-		reverse_proxy localhost:9001
-	}
-
 	encode gzip zstd
 
-	# 登录走 FBIF 统一登录（api/auth_login.go）：去登录中心、回调、飞书登录与授权、退出都在 Go。
-	# 登录健康检查只给本机看（在服务器上 curl 127.0.0.1:9001/internal/auth/health）；
-	# 叫醒接口 /internal/auth/*-changed 是中台和集成平台从外网调的，登录中心的退出通知 /auth/backchannel-logout 也从外网来，照常放行。
-	# 两个 handle 互不重叠（handle 比 respond 先跑，单写 respond 挡不住）。
-	@fbifLoginHealth path /internal/auth/health
-	handle @fbifLoginHealth {
-		respond 404
-	}
-
-	@fbifAuth {
-		path /auth/login /auth/center/* /auth/feishu/* /auth/feishu-grant /auth/backchannel-logout /internal/auth/*
-		not path /internal/auth/health
-	}
-	handle @fbifAuth {
-		reverse_proxy localhost:9001
-	}
-
-	# 智能体入口（MCP，api/agent_mcp.go）：MCP、授权页与换令牌（/oauth/*）、授权元数据（/.well-known/oauth-*）都在 Go。
-	# 排版一次最多等 40 秒，超时与 /api 一样放宽。
-	@fbifAgent path /mcp /oauth/* /.well-known/oauth-*
-	handle @fbifAgent {
-		reverse_proxy localhost:9001 {
+	# ── 不过登录：别的程序调的路径，各用自己的钥匙或签名（和 api/auth_login.go 的 programPathPrefixes 同一张单子）──
+	# 健康检查；监控端交稿、补登、告警（X-Publish-Sync-Token）；飞书卡片回调（websocket 模式下 Go 回 404）；
+	# 排版接口 v1（flk_ 钥匙）；程序化排版（Bearer RENDER_TOKEN）；智能体的 MCP、换令牌、注册、撤销、授权元数据、传 Word；
+	# 带签名的审核预览页；按内容哈希取的图片缓存。智能体授权页 /oauth/authorize 是人点的，要登录，不在这里。
+	@fbifProgram path /api/health /api/publish/site-sync /api/publish/official-sync /api/publish/monitor-alert /api/feishu/card-callback /api/layout/v1/* /api/render /api/render/* /api/html-to-blocks /api/agent/uploads/* /api/doc-cache/* /mcp /oauth/token /oauth/register /oauth/revoke /.well-known/oauth-* /preview/*
+	handle @fbifProgram {
+		request_header -X-FBIF-User
+		reverse_proxy 127.0.0.1:9001 {
 			transport http {
 				read_timeout 180s
 				write_timeout 180s
@@ -80,9 +55,12 @@ fbifmp-layout.foodtalks.cn {
 		}
 	}
 
-	@fbifAPI path /api /api/*
-	handle @fbifAPI {
-		reverse_proxy localhost:9001 {
+	# 人和程序都调的接口：带了程序钥匙的（监控端 X-Publish-Sync-Token、运维 X-Publish-Admin-Token、
+	# 贵接口 EXPENSIVE_API_TOKEN）不过登录，由 Go 核钥匙；没带的照常过登录。
+	@fbifProgramKey expression `(path('/api/publish/*') && (header({'X-Publish-Sync-Token': '*'}) || header({'X-Publish-Admin-Token': '*'}))) || (path('/api/oss-upload', '/api/doc-to-docx') && (header({'Authorization': '*'}) || header({'X-Expensive-API-Token': '*'})))`
+	handle @fbifProgramKey {
+		request_header -X-FBIF-User
+		reverse_proxy 127.0.0.1:9001 {
 			transport http {
 				read_timeout 180s
 				write_timeout 180s
@@ -90,11 +68,38 @@ fbifmp-layout.foodtalks.cn {
 		}
 	}
 
-	handle {
+	# 本人飞书授权（api/internal/feishugrant）：在 /auth/* 下（飞书开放平台登记的回调地址不变），
+	# 但由本项目处理，不转给登录中心；照样先问中心认人（没登录接口回 401、页面去登录）。
+	# 用 route 按写的顺序跑：handle 里 Caddy 会把 forward_auth 排在 request_header 前，先删头就把中心给的人也删了。
+	@fbifFeishuGrant path /auth/feishu-grant /auth/feishu/fbif/qr-callback
+	handle @fbifFeishuGrant {
+		route {
+			request_header -X-FBIF-User
+			forward_auth 127.0.0.1:19160 {
+				uri /_fbif/verify
+				header_up X-FBIF-Verify caddy
+				copy_headers X-FBIF-User
+				lb_try_duration 10s
+			}
+			reverse_proxy 127.0.0.1:9001
+		}
+	}
+
+	# 静态文件和以前一样公开（审核预览页、飞书侧边栏 distribute.html 不带登录也要取 js/css/图片）；
+	# 编辑器页面（/、app.html、site.html、/mp/*、/ft/*）不在这里，由下面的入口拦截后交给 Go。
+	@fbifStatic {
+		file {
+			root /var/www/wechat-layout
+		}
+		not path / /index.html /app.html /site.html
+	}
+	handle @fbifStatic {
 		root * /var/www/wechat-layout
-		try_files {path} /index.html
-		@static path *.css *.js
-		header @static Cache-Control "no-cache"
+		@fbifStaticCode path *.css *.js
+		header @fbifStaticCode Cache-Control "no-cache"
 		file_server
 	}
+
+	# 其余（编辑器页面、/api、智能体授权页）都要登录：入口问登录中心，登了交给 Go。
+	import fbif_login 127.0.0.1:9001
 }

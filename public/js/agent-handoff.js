@@ -2,6 +2,7 @@
 // /<渠道>/<账号>?agent=<编号>。打开时按智能体交来的同一份输入重新导入，和人自己操作一模一样：
 // 链接 = 粘贴链接，文字 = 粘贴文字，Markdown = 上传 .md，Word = 上传 Word。
 // 不存成品、不另排一套：交接只换输入从哪来，排版、校对、复制全走编辑器原来那条路。
+import { authFetch } from './auth-session.js';
 
 const ID_PATTERN = /^ag_[A-Za-z0-9_-]{22}$/;
 
@@ -39,7 +40,7 @@ async function readError(res) {
 export async function runAgentHandoff({
   windowRef = globalThis.window,
   documentRef = globalThis.document,
-  fetchImpl = globalThis.fetch,
+  fetchImpl = authFetch,
   submit,
   importText,
   uploadFile,

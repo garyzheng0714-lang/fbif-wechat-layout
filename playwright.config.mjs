@@ -51,11 +51,10 @@ export default defineConfig({
   updateSnapshots: process.env.E2E_UPDATE_BASELINE === '1' ? 'all' : 'none',
   snapshotPathTemplate: '{testDir}/e2e-baselines/{arg}{ext}',
   webServer: {
-    // 编辑器要求先登录。本地/CI 用开发登录（-tags devlogin + AUTH_DEV_LOGIN=true，
-    // POST /auth/dev-login 直接登成 account:<username>）；生产编译里没有它，ENV=production 也拒绝启动。
+    // 编辑器要求先登录：生产里入口写 X-FBIF-User；这里直接起 Go，用例给请求带上这个头（tests/e2e-login.mjs）。
     // 每次运行都从空库起：规则、绑定与用户库都会被用例写脏，留到下一次运行会让
     // 「复制出的规则不得重名」这类断言依赖上一轮的残留数据，红绿不可复现。
-    command: `rm -rf ${e2eDataDir} && mkdir -p ${e2eDataDir} && cd api &&AUTH_DEV_LOGIN=true AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests RULES_STORE_PATH=../${e2eDataDir}/rules.json go run -tags devlogin . -port ${e2ePort}`,
+    command: `rm -rf ${e2eDataDir} && mkdir -p ${e2eDataDir} && cd api && AUTH_SESSION_SECRET=local-e2e-session-secret-for-tests RULES_STORE_PATH=../${e2eDataDir}/rules.json go run . -port ${e2ePort}`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 90000,

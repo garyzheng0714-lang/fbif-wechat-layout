@@ -10,6 +10,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { loginAs } from './e2e-login.mjs';
 import fs from 'fs';
 import path from 'path';
 
@@ -22,12 +23,9 @@ const PLAIN = { username: 'e2e', name: 'E2E 测试账号' };
 // 登录只带身份，角色住在用户库 JSON 里。首次登录写入记录后把它改成 admin，用户库每次
 // 请求都读盘，改完下一个请求就拿到 rule_admin。生产的超级管理员仍然只能来自
 // RULE_SUPER_ADMIN_OPEN_IDS，这里提到的 admin 拿不到 rule_super_admin。
-// 本地测试用开发登录（go run -tags devlogin，AUTH_DEV_LOGIN=true）：直接登成 account:<username>。
+// 测试不经入口：请求带上 X-FBIF-User（tests/e2e-login.mjs），当成 account:<username>。
 async function signIn(context, credentials) {
-  const response = await context.request.post(`${BASE}/auth/dev-login`, {
-    data: credentials,
-  });
-  if (!response.ok()) throw new Error(`登录失败（${response.status()}）：${await response.text()}`);
+  await loginAs(context, credentials);
 }
 
 async function promoteToRuleAdmin(context) {

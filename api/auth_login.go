@@ -1,7 +1,10 @@
 package main
 
-// auth_login.go — 把 FBIF 统一登录（internal/auth）和本人飞书授权（internal/feishugrant）接到排版工具上。
-// 两个模板都是原样复制、不改；这里只写本项目的那几项：用户库怎么认人、谁能授权飞书、「我是谁」回什么。
+// auth_login.go — 「请求上是谁」只读入口给的请求头 X-FBIF-User（internal/login，模板原样复制）；本人飞书授权
+// （internal/feishugrant，模板原样复制）和登录分开做。本项目没有登录代码：入口（Caddy）每个请求先问 FBIF 登录中心，
+// 没登录的页面由中心跳去登录、接口由中心回 401；/auth/*、/api/me 入口直接转给登录中心（本项目自己的两条授权路由例外，
+// 见 deploy/caddy/fbifmp-layout.caddy）。这里只写本项目的那几项：请求头上的人对上用户库（老用户编号、角色不变）、
+// 谁能授权飞书、「我是谁」回什么、智能体放谁。
 
 import (
 	"context"
@@ -10,43 +13,27 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"fbif-wechat-layout/api/internal/auth"
 	"fbif-wechat-layout/api/internal/feishugrant"
+	"fbif-wechat-layout/api/internal/login"
 )
 
 const (
 	// fbifCompanyCode 是 FBIF 在统一登录里的企业编号；FBIF 的 sub 就是飞书 union_id。
 	fbifCompanyCode = "FJY632B9P3E"
-	// accountCompanyCode 是账号密码登录的人（登录中心）的企业编号，和登录模板里的一样。
+	// accountCompanyCode 是账号密码登录的人（登录中心）的企业编号。
 	accountCompanyCode = "account"
 	// legacyFeishuUserPrefix：2026-11-10 换统一登录前用飞书登录过的人，用户 ID 是 feishu:<open_id>，都是 FBIF 的。
 	legacyFeishuUserPrefix = "feishu:"
-	// ssoSessionCookie 是登录模板的会话 cookie 名（模板里的 sessionCookie）；没有它的请求不去问登录模板。
-	ssoSessionCookie = "__Host-fbif_sid"
+	// agentSeenWithin：智能体拿的是自己的令牌、不经入口，离职、停用由登录中心在入口挡；所以要这个人这么多天内
+	// 在浏览器里经入口进来过（用户库 last_login_at），智能体才替他干活。离职的人进不来，最多再用这么久。
+	agentSeenWithin = 7 * 24 * time.Hour
 )
-
-// loginBackend 是「请求上是谁」的来源：生产是统一登录，本地端到端测试是 devlogin（只在 -tags devlogin 编译）。
-type loginBackend interface {
-	// register 挂登录和飞书授权的路由。
-	register(mux *http.ServeMux)
-	// wrap 包住整个服务：认出请求上的人（withLayoutUser），记请求日志。
-	wrap(next http.Handler) http.Handler
-	// page 包住发页面的处理：没登录打开页面当场跳去登录、登完回到这一页。
-	page(next http.Handler) http.Handler
-	// agentCheck 这个人现在能不能让智能体替他用排版工具（agent_mcp.go 每次调用、每次换令牌都问）。
-	agentCheck(ctx context.Context, user authUser) error
-	// agentCapable 这类账号能不能接智能体：编辑器身份菜单据此给「接入智能体」（/api/auth/me 的 capabilities.agent）。
-	agentCapable(user authUser) bool
-	shutdown(ctx context.Context) error
-}
-
-// devLoginBackend 由 auth_devlogin.go（-tags devlogin）填上；生产编译里是 nil。
-var devLoginBackend func(users *authUserStore) (loginBackend, feishuTokenSource)
 
 func authUsersPath(rulesPath string) string {
 	if explicit := strings.TrimSpace(os.Getenv("AUTH_USERS_PATH")); explicit != "" {
@@ -122,36 +109,170 @@ func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]string{"error": message, "code": code})
 }
 
-// Register 挂登录、飞书授权和「我是谁」（GET /api/auth/me）。
+// newRuntimeAuthService 装配用户库和本人飞书授权。飞书授权文件 feishu-grants.json 和用户库放同一个目录，
+// refresh_token 用 SSO_TOKEN_KEY 加密：还是原来那把，已经授权过的人不用重新授权（只是变量名沿用登录模板时的叫法）。
+func newRuntimeAuthService(ctx context.Context, rulesPath string) (*authService, error) {
+	config, err := authConfigFromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	usersPath := authUsersPath(rulesPath)
+	service, err := newAuthService(config, newAuthUserStore(usersPath), newHTTPFeishuProvider(&http.Client{Timeout: 45 * time.Second}))
+	if err != nil {
+		return nil, err
+	}
+	if config.FeishuAppID == "" || config.FeishuSecret == "" || feishuGrantRedirectURL() == "" {
+		log.Printf("auth: 飞书应用没配全，谁都授权不了飞书（搜文档、导入、列群用不了）")
+		return service, nil
+	}
+	stateDir := filepath.Dir(usersPath)
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return nil, fmt.Errorf("auth: 建 %s: %w", stateDir, err)
+	}
+	grants, err := feishugrant.New(ctx, feishugrant.Options{
+		Apps: map[string]feishugrant.App{"fbif": {
+			AppID:       config.FeishuAppID,
+			AppSecret:   config.FeishuSecret,
+			RedirectURL: feishuGrantRedirectURL(),
+		}},
+		Scopes:  feishuGrantScopes(),
+		SealKey: os.Getenv("SSO_TOKEN_KEY"),
+		File:    filepath.Join(stateDir, "feishu-grants.json"),
+		Who:     grantWho,
+		Check:   service.checkGrant,
+		Logger:  slog.Default(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	service.grants = grants
+	service.tokens = grants
+	return service, nil
+}
+
+// Register 挂本人飞书授权（GET /auth/feishu-grant 和回调）和「我是谁」（GET /api/auth/me）。
 func (s *authService) Register(mux *http.ServeMux) {
-	if s.login != nil {
-		s.login.register(mux)
+	if s.grants != nil {
+		s.grants.Register(mux, s.requireLogin)
 	}
 	mux.HandleFunc("GET /api/auth/me", noStoreHandler(s.handleCurrentUser))
 }
 
-// Wrap 包住整个服务：认出请求上的人、记请求日志。
+// programPathPrefixes 是不过登录的路径：别的程序调的（健康检查、监控端交稿和告警、飞书卡片回调、排版接口、程序化排版、
+// 智能体的 MCP 和换令牌、传 Word），各用自己的钥匙或签名；带签名的审核预览页；按内容哈希取的图片缓存（上传服务、
+// 微信后台不带登录也要取得到，和以前一样公开）。入口不拦，这里也不认请求头上的人（浏览器自己带的 X-FBIF-User 删掉）。
+// 和 deploy/caddy/fbifmp-layout.caddy 的 @program 是同一张单子（tests/deploy-transaction.test.mjs 核对）。
+// 授权页 /oauth/authorize 是人在浏览器里点的，要登录，不在这里。
+var programPathPrefixes = []string{
+	"/api/health",
+	"/api/publish/site-sync",
+	"/api/publish/official-sync",
+	"/api/publish/monitor-alert",
+	"/api/feishu/card-callback",
+	"/api/layout/v1/",
+	"/api/render",
+	"/api/html-to-blocks",
+	"/api/agent/uploads/",
+	"/mcp",
+	"/oauth/token",
+	"/oauth/register",
+	"/oauth/revoke",
+	"/.well-known/oauth-",
+	"/preview/",
+	"/api/doc-cache/",
+}
+
+func programPath(path string) bool {
+	for _, prefix := range programPathPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// Wrap 包住整个服务：请求头上有人就对上用户库，把用户 ID 放进 context；没有就照常往下走，
+// 哪些接口要登录由各接口自己判断（currentUser）。正常情况下要登录的路径没登录到不了这里（入口挡了）。
 func (s *authService) Wrap(next http.Handler) http.Handler {
-	if s.login == nil {
-		return next
-	}
-	return s.login.wrap(next)
+	identified := login.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		visitor, _ := login.Current(r)
+		user, err := s.users.RecordVisit(visitorFromHeader(visitor), s.now())
+		switch {
+		case err != nil:
+			// 用户库读写不了：当登录服务一时不可用（503），不能回 401，否则页面去登录、登完回来又 401，来回跳。
+			log.Printf("auth: 用户库记不下 %s：%v", visitor.ID, err)
+			r = r.WithContext(context.WithValue(r.Context(), loginUnavailableKey{}, true))
+		case user.Status != authUserActive:
+			// 管理员在本项目停用的人：入口放行了也不让用。回 403 不回 401，免得去登录、登完又被挡，来回跳。
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				writeAuthError(w, http.StatusForbidden, "account_disabled", "这个账号在排版工具里已停用，请找管理员")
+			} else {
+				http.Error(w, "这个账号在排版工具里已停用，请找管理员", http.StatusForbidden)
+			}
+			return
+		default:
+			r = r.WithContext(withLayoutUser(r.Context(), user.ID))
+		}
+		next.ServeHTTP(w, r)
+	}))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if programPath(r.URL.Path) {
+			r.Header.Del(login.Header)
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Header.Get(login.Header) == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		identified.ServeHTTP(w, r)
+	})
 }
 
-// Page 包住发页面的处理（app.html、site.html）：没登录打开当场跳去登录，不先把页面发下来。没装配登录（单元测试）不包。
+// visitorFromHeader 把入口给的人换成用户库的样子：FBIF 飞书登录的带上 union_id（sub 就是 union_id），
+// 用户库按它认回换统一登录前的老编号 feishu:<open_id>。
+func visitorFromHeader(u login.User) authUser {
+	visitor := authUser{
+		ID:          u.ID,
+		Name:        u.Name,
+		AvatarURL:   u.AvatarURL,
+		Email:       u.Email,
+		CompanyCode: u.CompanyCode,
+		AuthMode:    authModeFeishu,
+		Status:      authUserActive,
+	}
+	if u.CompanyCode == accountCompanyCode {
+		visitor.AuthMode = authModePassword
+	}
+	if sub, ok := strings.CutPrefix(u.ID, fbifCompanyCode+":"); ok && u.CompanyCode == fbifCompanyCode {
+		visitor.FeishuUnionID = sub
+	}
+	return visitor
+}
+
+// requireLogin 包住要登录才能用的路由（飞书授权两条）：请求上没有人回 401，前端带去登录。
+func (s *authService) requireLogin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if layoutUserID(r.Context()) == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "login_required", "code": "authentication_required", "login_url": "/auth/login"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Page 包住浏览器打开的页面（智能体授权页）：请求上没有人就去登录、登完回到这一页。入口没登录会先跳，
+// 这里只兜入口没拦住的情况；登录中心一时查不了（入口放行、不带人）不跳，由页面说清楚。
 func (s *authService) Page(next http.Handler) http.Handler {
-	if s.login == nil {
-		return next
-	}
-	return s.login.page(next)
-}
-
-// Shutdown 在 http.Server.Shutdown 之后调：把登录日志的待写队列落盘。
-func (s *authService) Shutdown(ctx context.Context) error {
-	if s.login == nil {
-		return nil
-	}
-	return s.login.shutdown(ctx)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, unavailable := r.Context().Value(loginUnavailableKey{}).(bool)
+		if layoutUserID(r.Context()) == "" && !unavailable && r.Header.Get(login.Header) == "" {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *authService) handleCurrentUser(w http.ResponseWriter, r *http.Request) {
@@ -169,115 +290,9 @@ func (s *authService) handleCurrentUser(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"user": public})
 }
 
-// onLogin 把统一登录的人对上用户库（auth.Options.OnLogin）：老用户按 union_id 认回原来的 ID、角色和停用。
-func (s *authService) onLogin(_ context.Context, id auth.Identity) (string, error) {
-	login := authUser{
-		ID:          id.Key(),
-		Name:        id.Name,
-		AvatarURL:   id.Picture,
-		Email:       id.Email,
-		CompanyCode: id.CompanyCode,
-		AuthMode:    authModeFeishu,
-		Status:      authUserActive,
-	}
-	if id.CompanyCode == accountCompanyCode {
-		login.AuthMode = authModePassword
-	}
-	if id.CompanyCode == fbifCompanyCode {
-		login.FeishuUnionID = id.Sub
-	}
-	user, err := s.users.RecordLogin(login, s.now())
-	if err != nil {
-		return "", err
-	}
-	if user.Status != authUserActive {
-		return "", auth.ErrNotAllowed
-	}
-	return user.ID, nil
-}
-
-// ---------- 生产：统一登录 + 本人飞书授权 ----------
-
-type ssoLogin struct {
-	sso    *auth.SSO
-	store  *auth.FileStore
-	grants *feishugrant.Grants
-}
-
-func newRuntimeAuthService(ctx context.Context, rulesPath string) (*authService, error) {
-	config, err := authConfigFromEnvironment()
-	if err != nil {
-		return nil, err
-	}
-	usersPath := authUsersPath(rulesPath)
-	service, err := newAuthService(config, newAuthUserStore(usersPath), newHTTPFeishuProvider(&http.Client{Timeout: 45 * time.Second}))
-	if err != nil {
-		return nil, err
-	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("AUTH_DEV_LOGIN")), "true") {
-		if devLoginBackend == nil || productionRuntime() {
-			return nil, errors.New("AUTH_DEV_LOGIN 只给本地端到端测试用（go run -tags devlogin），生产不许开")
-		}
-		service.login, service.tokens = devLoginBackend(service.users)
-		log.Printf("auth: 本地测试登录已开（/auth/dev-login），不是统一登录")
-		return service, nil
-	}
-	login, err := newSSOLogin(ctx, service, filepath.Dir(usersPath))
-	if err != nil {
-		return nil, err
-	}
-	service.login = login
-	if login.grants != nil {
-		service.tokens = login.grants
-	}
-	return service, nil
-}
-
-// newSSOLogin 读登录模板的 SSO_* 环境变量（缺了启动失败），会话和飞书授权放在用户库同一个目录。
-func newSSOLogin(ctx context.Context, service *authService, stateDir string) (*ssoLogin, error) {
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return nil, fmt.Errorf("auth: 建 %s: %w", stateDir, err)
-	}
-	store, err := auth.NewFileStore(filepath.Join(stateDir, "sso-sessions.json"))
-	if err != nil {
-		return nil, err
-	}
-	sso, err := auth.New(ctx, auth.Options{Store: store, OnLogin: service.onLogin})
-	if err != nil {
-		return nil, err
-	}
-	login := &ssoLogin{sso: sso, store: store}
-	if service.config.FeishuAppID == "" || service.config.FeishuSecret == "" || feishuGrantRedirectURL() == "" {
-		log.Printf("auth: 飞书应用没配全，谁都授权不了飞书（搜文档、导入、列群用不了）")
-		return login, nil
-	}
-	login.grants, err = feishugrant.New(ctx, feishugrant.Options{
-		Apps: map[string]feishugrant.App{"fbif": {
-			AppID:       service.config.FeishuAppID,
-			AppSecret:   service.config.FeishuSecret,
-			RedirectURL: feishuGrantRedirectURL(),
-		}},
-		Scopes:  feishuGrantScopes(),
-		SealKey: os.Getenv("SSO_TOKEN_KEY"),
-		File:    filepath.Join(stateDir, "feishu-grants.json"),
-		Who:     grantWho,
-		Check:   service.checkGrant,
-		Logger:  slog.Default(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return login, nil
-}
-
-// grantWho：请求上的人（排版工具认出的，或登录模板放进来的）和他用哪个飞书应用授权。
+// grantWho：请求上的人（用户库里的编号，飞书授权按它存）和他用哪个飞书应用授权。
 func grantWho(r *http.Request) (string, string) {
 	id := layoutUserID(r.Context())
-	if id == "" {
-		if u := auth.CurrentUser(r); u != nil {
-			id = u.ID
-		}
-	}
 	if id == "" {
 		return "", ""
 	}
@@ -286,154 +301,37 @@ func grantWho(r *http.Request) (string, string) {
 
 // checkGrant：授权的飞书账号得是登录的这个人（FBIF 的 sub 就是 union_id），对上了记下他在本应用下的 open_id（超级管理员按它认）。
 func (s *authService) checkGrant(r *http.Request, _ string, fu feishugrant.FeishuUser) error {
-	return s.checkGrantUser(auth.CurrentUser(r), fu)
+	visitor, _ := login.Current(r)
+	return s.checkGrantUser(layoutUserID(r.Context()), visitor, fu)
 }
 
-func (s *authService) checkGrantUser(u *auth.User, fu feishugrant.FeishuUser) error {
-	if u == nil {
+func (s *authService) checkGrantUser(userID string, visitor login.User, fu feishugrant.FeishuUser) error {
+	if userID == "" {
 		return errors.New("没登录")
 	}
-	if u.CompanyCode != fbifCompanyCode || fu.UnionID == "" || fu.UnionID != u.Sub {
+	sub, ok := strings.CutPrefix(visitor.ID, fbifCompanyCode+":")
+	if !ok || visitor.CompanyCode != fbifCompanyCode || fu.UnionID == "" || fu.UnionID != sub {
 		return errors.New("授权的飞书账号和登录的不是同一个人（union_id 对不上）")
 	}
-	if err := s.users.SetFeishuOpenID(u.ID, fu.OpenID, s.now()); err != nil {
+	if err := s.users.SetFeishuOpenID(userID, fu.OpenID, s.now()); err != nil {
 		return fmt.Errorf("记 open_id: %w", err)
 	}
 	return nil
 }
 
-func (l *ssoLogin) register(mux *http.ServeMux) {
-	l.sso.Register(mux)
-	if l.grants != nil {
-		l.grants.Register(mux, l.sso.RequireUser)
-	}
-}
-
-func (l *ssoLogin) shutdown(ctx context.Context) error { return l.sso.Shutdown(ctx) }
-
-func (l *ssoLogin) page(next http.Handler) http.Handler { return l.sso.RequirePage(next) }
-
-// agentCheck 智能体拿的是自己的令牌、不走登录会话，登录模板的停用名单要在这里查：只放 FBIF 飞书登录的同事，
-// 离职、停用（登录中心推来的名单）的当场不让用；名单没同步过、读不出来也不放，和登录时一样。
-// feishuColleague 只有飞书登录的 FBIF 同事能接智能体：账号密码登录的外部编辑没有飞书身份，停用名单也认不出他。
+// feishuColleague 只有飞书登录的 FBIF 同事能接智能体：账号密码登录的外部编辑没有飞书身份。
 func feishuColleague(user authUser) bool {
 	return feishuAppFor(user.ID) != "" && user.FeishuUnionID != ""
 }
 
-func (l *ssoLogin) agentCapable(user authUser) bool { return feishuColleague(user) }
-
-func (l *ssoLogin) agentCheck(ctx context.Context, user authUser) error {
+// agentCheck 这个人现在能不能让智能体替他用排版工具（agent_mcp.go 每次调用、每次换令牌都问）：
+// 飞书登录的 FBIF 同事，并且 agentSeenWithin 内在浏览器里经入口进来过（离职、停用的人入口不放，就进不来）。
+func (s *authService) agentCheck(user authUser) error {
 	if !feishuColleague(user) {
 		return errors.New("只有用飞书登录的 FBIF 同事能让智能体用排版工具")
 	}
-	if _, synced, err := l.store.BlocklistRevision(ctx); err != nil || !synced {
-		return errors.New("停用名单读不出来，过一会儿再试")
-	}
-	entry, err := l.store.BlockedEntry(ctx, user.FeishuUnionID)
-	if err != nil {
-		return errors.New("停用名单读不出来，过一会儿再试")
-	}
-	if entry != nil {
-		return errors.New("这个账号已停用")
+	if user.LastLoginAt.IsZero() || s.now().Sub(user.LastLoginAt) > agentSeenWithin {
+		return fmt.Errorf("超过 %d 天没在浏览器里打开排版工具：先打开一次 %s/mp/fbif，再回来重试", int(agentSeenWithin/(24*time.Hour)), publishPreviewBaseURL())
 	}
 	return nil
-}
-
-// machinePathPrefixes 是机器调的接口（监控端交稿、飞书卡片回调、排版接口、程序化排版、监控告警），各用自己的钥匙，
-// 不是人的操作：不认人、不记登录日志。
-var machinePathPrefixes = []string{
-	"/api/publish/site-sync",
-	"/api/publish/official-sync",
-	"/api/publish/monitor-alert",
-	"/api/feishu/card-callback",
-	"/api/layout/v1/",
-	"/api/render",
-	"/api/html-to-blocks",
-	// 智能体（agent_mcp.go）：MCP 和换令牌、注册、吊销用自己的令牌，传 Word 用一次性地址。
-	// 授权页 /oauth/authorize 是人在浏览器里点的，不在这里。
-	"/mcp",
-	"/oauth/token",
-	"/oauth/register",
-	"/oauth/revoke",
-	"/.well-known/oauth-",
-	"/api/agent/uploads/",
-}
-
-func machinePath(path string) bool {
-	for _, prefix := range machinePathPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// wrap：/api/ 下带会话 cookie 的请求先过登录模板认人（认出来就把用户 ID 放进 context），
-// 认不出也照常往下走：哪些接口要登录由各接口自己判断（currentUser），公开接口照常开。
-// 登录模板自己的路由（/api/me、/auth/*）它自己把门，这里不再认一遍。
-func (l *ssoLogin) wrap(next http.Handler) http.Handler {
-	probed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !identifiedPath(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if c, err := r.Cookie(ssoSessionCookie); err != nil || c.Value == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		rec := &probeRecorder{header: http.Header{}}
-		var passed *http.Request
-		l.sso.RequireUser(http.HandlerFunc(func(_ http.ResponseWriter, inner *http.Request) {
-			passed = inner
-		})).ServeHTTP(rec, r)
-		// 登录模板续期或清掉 cookie 都写在 Set-Cookie 里，照样带给浏览器。
-		for _, cookie := range rec.header.Values("Set-Cookie") {
-			w.Header().Add("Set-Cookie", cookie)
-		}
-		if passed != nil {
-			if u := auth.CurrentUser(passed); u != nil {
-				next.ServeHTTP(w, passed.WithContext(withLayoutUser(passed.Context(), u.ID)))
-				return
-			}
-		}
-		if rec.status == http.StatusServiceUnavailable {
-			r = r.WithContext(context.WithValue(r.Context(), loginUnavailableKey{}, true))
-		}
-		next.ServeHTTP(w, r)
-	})
-	logged := l.sso.Middleware(probed)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if machinePath(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		logged.ServeHTTP(w, r)
-	})
-}
-
-// identifiedPath 要认人的路径：/api/ 下的接口（/api/me 登录模板自己认），和智能体的授权页（人在浏览器里点「允许」）。
-func identifiedPath(path string) bool {
-	if path == "/api/me" {
-		return false
-	}
-	return strings.HasPrefix(path, "/api/") || path == agentAuthorizePath
-}
-
-// probeRecorder 接住登录模板认人失败时写的回答（不给浏览器），只留状态码和 Set-Cookie。
-type probeRecorder struct {
-	header http.Header
-	status int
-}
-
-func (p *probeRecorder) Header() http.Header { return p.header }
-func (p *probeRecorder) WriteHeader(status int) {
-	if p.status == 0 {
-		p.status = status
-	}
-}
-func (p *probeRecorder) Write(b []byte) (int, error) {
-	if p.status == 0 {
-		p.status = http.StatusOK
-	}
-	return len(b), nil
 }

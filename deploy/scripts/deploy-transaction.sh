@@ -39,6 +39,7 @@ HUB_RENDER_ENV=/etc/fbif-hub/env/render.env
 API_READINESS_URL=http://127.0.0.1:9001/api/publish/readiness
 API_UPLOAD_URL=http://127.0.0.1:9001/api/oss-upload
 CADDY_TARGET=/etc/caddy/sites/fbifmp-layout.caddy
+GATEWAY_SNIPPET=/etc/caddy/snippets/fbif-login.caddy
 API_SERVICE_TARGET=/etc/systemd/system/fbif-api.service
 RENDER_SERVICE_TARGET=/etc/systemd/system/fbif-render.service
 # 排版接口（/api/layout/v1）的排版程序：同一份 render-service 代码的另一个进程（layout-server.mjs，19098），
@@ -178,7 +179,12 @@ validate_release() {
   systemctl is-enabled --quiet fbif-render || die "fbif-render is not enabled before deploy"
   [[ -x /usr/bin/node ]] || die "missing /usr/bin/node required by fbif-render.service"
   caddy validate --config /etc/caddy/Caddyfile >/dev/null
-  caddy validate --adapter caddyfile --config "$RELEASE_DIR/caddy/fbifmp-layout.caddy" >/dev/null
+  # 站点文件最后一行 import fbif_login（登录中心的入口片段，主 Caddyfile 开头 import 它）：单独校验找不到片段，
+  # 和片段叠在一起校验；片段不在说明入口还没装好，这版上去谁都登不进，直接停。
+  [[ -f "$GATEWAY_SNIPPET" ]] || die "missing login gateway snippet $GATEWAY_SNIPPET"
+  printf 'import %s\nimport %s\n' "$GATEWAY_SNIPPET" "$RELEASE_DIR/caddy/fbifmp-layout.caddy" \
+    >"$RELEASE_DIR/caddy/validate.caddyfile"
+  caddy validate --adapter caddyfile --config "$RELEASE_DIR/caddy/validate.caddyfile" >/dev/null
   systemd-analyze verify \
     "$RELEASE_DIR/systemd/fbif-api.service" \
     "$RELEASE_DIR/systemd/fbif-render.service" \
