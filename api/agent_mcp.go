@@ -35,9 +35,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// agentAuthorizePath 授权页：人在浏览器里点「允许」，登录接线（auth_login.go identifiedPath）要在这里认人。
-const agentAuthorizePath = "/oauth/authorize"
-
 const (
 	// agentToolWait 一次工具调用最多等多久：Codex 默认一次调用 60 秒超时，留出余量，没完就给编号让它再来取。
 	agentToolWait = 40 * time.Second

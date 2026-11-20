@@ -2,7 +2,6 @@
 // 同事把提示词发给自己的智能体（Codex、Claude Code、Cursor……），智能体照着把排版工具加上、带人用飞书登录、教他怎么用。
 // 提示词只在 agentConnectPrompt 写一份：README「在智能体里用」那段由 tests/agent-connect.test.mjs 照它核对，
 // 改了提示词跑 `README_UPDATE=1 node --test tests/agent-connect.test.mjs` 重写 README。
-import { authFetch } from './auth-session.js';
 
 export const AGENT_SERVER_NAME = 'fbif-layout';
 
@@ -122,7 +121,7 @@ function buildDialog(documentRef) {
 // openAgentConnect 打开「接入智能体」窗口；已经开过就把同一个再拿出来，地址只问一次。
 export function openAgentConnect({
   documentRef = globalThis.document,
-  fetchImpl = authFetch,
+  fetchImpl = globalThis.fetch,
   clipboard = globalThis.navigator?.clipboard,
 } = {}) {
   let dialog = documentRef.querySelector('dialog.agent-connect');
