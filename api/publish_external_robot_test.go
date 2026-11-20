@@ -482,7 +482,7 @@ func TestRobotPublishOutcomes(t *testing.T) {
 		{name: "草稿被人改过", err: rejected(409, "draft_changed", "草稿被人改过"), state: publishExternalDistributionReconciliationRequired, reason: "分发工具没发布：草稿被人改过；请到百家号后台核对", status: "待核对"},
 		{name: "已不是草稿", err: rejected(409, "wrong_state", "这篇现在是已撤回"), state: publishExternalDistributionReconciliationRequired, reason: "请到百家号后台核对", status: "待核对"},
 		{name: "号里已经有同名的", err: rejected(409, "already_posted", "百家号上最近已经有同名的 2 篇：222（11/4 09:20，publish）；333（11/4 10:00，publish），没再发。确实要再发，先在后台删掉旧的"), state: publishExternalDistributionReconciliationRequired, reason: "分发工具没发布：百家号上最近已经有同名的 2 篇", status: "待核对"},
-		{name: "服务器没登录", err: rejected(503, "login_required", "没登录"), state: publishExternalDistributionFailed, reason: "远程画面里登录后重新同步", status: "失败", retry: true},
+		{name: "服务器没登录", err: rejected(503, "login_required", "没登录"), state: publishExternalDistributionFailed, reason: "没登录，登好后系统自己重新同步", status: "失败", retry: true},
 		{name: "找不到发布按钮", err: rejected(422, "button_not_found", "找不到「发布」"), state: publishExternalDistributionFailed, reason: "分发工具没发布：找不到「发布」", status: "失败", retry: true},
 		{name: "这篇正在做别的", err: rejected(409, "busy", "这篇正在做别的"), state: publishExternalDistributionPublishing, status: "发布中"},
 		{name: "说不准", err: &robotUncertainError{Cause: "网络请求失败或超时"}, state: publishExternalDistributionPublishing, status: "发布中"},
@@ -502,6 +502,9 @@ func TestRobotPublishOutcomes(t *testing.T) {
 			lane := mustLane(t, got, testBaijiaAccountID)
 			if lane.State != tc.state || !strings.Contains(lane.Error, tc.reason) || lane.URL != tc.url || len(robot.saves) != 1 || len(robot.publishes) != 1 {
 				t.Fatalf("应为 %s（%q，链接 %q）：lane=%+v saves=%d publishes=%v", tc.state, tc.reason, tc.url, lane, len(robot.saves), robot.publishes)
+			}
+			if lane.LoginRequired != (tc.name == "服务器没登录") {
+				t.Fatalf("只有分发服务说没登录才记 login_required：%v", lane.LoginRequired)
 			}
 			if lane.ContentPK != testRobotArticleID || lane.DraftURL != testRobotDraftURL(testRobotArticleID) {
 				t.Fatalf("草稿存好了，编号与地址照记：%+v", lane)
@@ -564,7 +567,7 @@ func TestRobotLaneSaveOutcomes(t *testing.T) {
 		{name: "token 不对", saveErr: rejected(401, "unauthorized", "token 不对"), state: publishExternalDistributionFailed, reason: distributionAPITokenEnv, retry: true},
 		{name: "键已用于别的内容", saveErr: rejected(409, "idempotency_key_reused", "这个键已用来存过别的内容"), state: publishExternalDistributionFailed, reason: "这个键已用来存过别的内容", retry: true},
 		{name: "封面下不来", saveErr: rejected(422, "cover_unavailable", "封面下不下来"), state: publishExternalDistributionFailed, reason: "封面下不下来", retry: true},
-		{name: "服务器没登录", saveErr: rejected(503, "login_required", "没登录"), state: publishExternalDistributionFailed, reason: "远程画面里登录后重新同步", retry: true},
+		{name: "服务器没登录", saveErr: rejected(503, "login_required", "没登录"), state: publishExternalDistributionFailed, reason: "没登录，登好后系统自己重新同步", retry: true},
 		{name: "草稿箱要人删", saveErr: &robotReconcileError{Message: "草稿箱里这次新建的同名草稿有 2 篇，请删到只剩一篇"}, state: publishExternalDistributionReconciliationRequired, reason: "同名草稿有 2 篇"},
 		{name: "平台出错后查到已存", saveErr: uncertain, getRecord: testRobotSavedRecord(testRobotArticleID), state: publishExternalDistributionSucceeded, gets: 1, publishes: 1},
 		{name: "平台出错后查到失败", saveErr: uncertain, getRecord: robotDraftRecord{Status: robotDraftFailed, Error: &platformFailed}, state: publishExternalDistributionFailed, reason: "百家号编辑器没有出现；可以重新同步", gets: 1, retry: true},
@@ -586,6 +589,9 @@ func TestRobotLaneSaveOutcomes(t *testing.T) {
 			lane := mustLane(t, got, testBaijiaAccountID)
 			if lane.State != tc.state || !strings.Contains(lane.Error, tc.reason) || len(robot.gets) != tc.gets || len(robot.publishes) != tc.publishes {
 				t.Fatalf("应为 %s（%q），GET %d 次、发布 %d 次：lane=%+v gets=%v publishes=%v", tc.state, tc.reason, tc.gets, tc.publishes, lane, robot.gets, robot.publishes)
+			}
+			if lane.LoginRequired != (tc.name == "服务器没登录") {
+				t.Fatalf("只有分发服务说没登录才记 login_required：%v", lane.LoginRequired)
 			}
 			if tc.gets > 0 && robot.gets[0] != "baijiahao/"+lane.IntentKey {
 				t.Fatalf("应按提交时的幂等键查：%v key=%q", robot.gets, lane.IntentKey)
@@ -842,8 +848,8 @@ func TestRobotLaneCardWording(t *testing.T) {
 
 	contains(section(), `"content":"同步至百家号"`, `"content":"同步至百家号？"`, "将由分发工具把本文公开发布到百家号。请确认本文为原创文章。")
 	failed := robotLane(publishExternalDistributionFailed)
-	failed.Error = "服务器上的百家号没登录，请在分发工具的远程画面里登录后重新同步"
-	contains(section(failed), `"content":"重新同步至百家号"`, "<font color='red'>上次同步失败</font>", "远程画面里登录",
+	failed.Error, failed.LoginRequired = "服务器上的百家号没登录，登好后系统自己重新同步", true
+	contains(section(failed), `"content":"重新同步至百家号"`, "<font color='red'>上次同步失败</font>", "登好后系统自己重新同步",
 		"上次没有发到百家号，这次由分发工具重新同步、公开发布到百家号，不会重复存稿")
 
 	for state, status := range map[string]string{

@@ -16,6 +16,11 @@ package main
 //
 // 不碰：待核对（平台上可能有多篇或被人动过）、没通过、已下线、人工已发、正在做的；自动外发推的、号后来取消了「自动外发」的
 // 也不碰（取消勾选就是不要系统再往这个号发）。人在卡片上点一次就是新的请求，次数从头算。
+//
+// 号在分发服务器上没登录（分发服务回 login_required）是号的事，不是这一篇的事（2026-11-20 腾讯号掉登录一周没人扫码：
+// 每天还去开一遍登录页，告警按篇一天天往上加，过了 7 天的两篇悄悄不推了）：这样停着的 lane 不按退避去碰平台，等中台送来的
+// 「服务器登录」变回「已登录」、而且是这次失败之后查的，就马上接着推，不扣 7 天、不用人点；等多久从最初请求算到 30 天。
+// 等着的时候 monitoring 每个号只报一条 external_login_required。中台没送登录状态的（还没接上）照普通退避。
 
 import (
 	"errors"
@@ -33,7 +38,56 @@ const (
 
 	externalAutoRetryStartHour = 9
 	externalAutoRetryEndHour   = 21
+
+	// externalLoginWaitWindow 号没登录停着的 lane 最多等多久（从最初请求算）：登好了这期间的接着推，再早的照普通失败算。
+	externalLoginWaitWindow = 30 * 24 * time.Hour
 )
+
+// externalAccountLoggedIn 中台「服务器登录」列登着的写法（分发服务写回：已登录、要登录）。
+const externalAccountLoggedIn = "已登录"
+
+// externalLoginWait 没成的 lane 和号的登录是什么关系。
+type externalLoginWait int
+
+const (
+	// externalLoginNone 不是因为没登录停着（或中台没送登录状态、等了 30 天以上）：照普通退避。
+	externalLoginNone externalLoginWait = iota
+	// externalLoginWaiting 号还没登好：不推、不按退避碰平台，monitoring 按号报一条。
+	externalLoginWaiting
+	// externalLoginBack 这次失败之后号登好了：马上接着推（只在 9–21 点）。
+	externalLoginBack
+)
+
+// externalLaneLoginRequired 这条 lane 是因为号没登录停着的。2026-11-20 之前的没记 LoginRequired，按当时卡片上那句认（线上只有腾讯号 5 条）。
+func externalLaneLoginRequired(lane publishExternalLane) bool {
+	return lane.LoginRequired || strings.HasSuffix(lane.Error, "没登录，请在分发工具的远程画面里登录后重新同步")
+}
+
+// externalLaneLogin 没成的 lane 是不是在等号登录、号登好了没有。
+func externalLaneLogin(lane publishExternalLane, target externalAccount, now time.Time) externalLoginWait {
+	if lane.Driver != externalDriverRobot || lane.State != publishExternalDistributionFailed || !externalLaneLoginRequired(lane) ||
+		target.Login == "" || !externalLaneTargetRetries(lane, target) {
+		return externalLoginNone
+	}
+	requested, err := time.Parse(time.RFC3339, lane.RequestedAt)
+	if err != nil || now.Sub(requested) > externalLoginWaitWindow {
+		return externalLoginNone
+	}
+	if stopped, err := time.Parse(time.RFC3339, lane.CompletedAt); err == nil &&
+		target.Login == externalAccountLoggedIn && target.LoginCheckedAt.After(stopped) {
+		return externalLoginBack
+	}
+	return externalLoginWaiting
+}
+
+// externalLaneTargetRetries 自动外发推的，号后来取消了「自动外发」就不再替它推。
+func externalLaneTargetRetries(lane publishExternalLane, target externalAccount) bool {
+	switch strings.TrimSpace(lane.RequestedBy) {
+	case publishExternalAutoActor, publishExternalAutoBackfillActor:
+		return target.Auto
+	}
+	return true
+}
 
 // publishExternalAutoRetryActor 系统自己重推时受理用的名字；lane 上照旧记原来的请求人。
 const publishExternalAutoRetryActor = "system:auto_retry"
@@ -60,14 +114,14 @@ func externalLaneAutoRetryState(lane publishExternalLane) bool {
 // externalLaneNextAutoRetry 这条 lane 下一次系统自己重推的时间（可能已经过了，到时就推）；不会再自己重推的回 false。
 // 7 天按此刻算：上线这段之前就停着的旧 lane（2026-10-30 之前只存草稿的、早先失败的）不会一上线就被推一遍。
 func externalLaneNextAutoRetry(lane publishExternalLane, target externalAccount, now time.Time) (time.Time, bool) {
-	if !externalLaneAutoRetryState(lane) {
+	if !externalLaneAutoRetryState(lane) || !externalLaneTargetRetries(lane, target) {
 		return time.Time{}, false
 	}
-	switch strings.TrimSpace(lane.RequestedBy) {
-	case publishExternalAutoActor, publishExternalAutoBackfillActor:
-		if !target.Auto {
-			return time.Time{}, false
-		}
+	switch externalLaneLogin(lane, target, now) {
+	case externalLoginWaiting:
+		return time.Time{}, false
+	case externalLoginBack:
+		return externalAutoRetryDaytime(now), true
 	}
 	requested, err := time.Parse(time.RFC3339, lane.RequestedAt)
 	if err != nil || now.Sub(requested) > externalAutoRetryWindow {
@@ -103,21 +157,31 @@ func externalAutoRetryDaytime(at time.Time) time.Time {
 	}
 }
 
-// externalLaneAwaitingAutoRetry 没成、但前几次退避还没用完、系统还会自己重推的：不算失败、不告警。
-func externalLaneAwaitingAutoRetry(job publishJob, lane publishExternalLane, now time.Time) bool {
-	if lane.AutoRetries >= len(externalAutoRetryDelays) {
-		return false
-	}
+// externalLaneOutlook monitoring 问的：这条没成的 lane 系统接下来管不管。
+type externalLaneOutlook struct {
+	// Target 这条 lane 的号（这篇能发的号里找到的才有，Found 为真）。
+	Target externalAccount
+	Found  bool
+	Login  externalLoginWait
+	// Retrying 系统还会自己重推、先不算失败：前几次退避没用完，或号刚登好。
+	Retrying bool
+}
+
+func externalLaneOutlookOf(job publishJob, lane publishExternalLane, now time.Time) externalLaneOutlook {
 	cfg, err := loadExternalTargets()
 	if err != nil {
-		return false
+		return externalLaneOutlook{}
 	}
 	target, ok := cfg.jobTarget(job, lane.AccountID)
 	if !ok {
-		return false
+		return externalLaneOutlook{}
 	}
-	_, ok = externalLaneNextAutoRetry(lane, target, now)
-	return ok
+	out := externalLaneOutlook{Target: target, Found: true, Login: externalLaneLogin(lane, target, now)}
+	if out.Login == externalLoginNone && lane.AutoRetries >= len(externalAutoRetryDelays) {
+		return out
+	}
+	_, out.Retrying = externalLaneNextAutoRetry(lane, target, now)
+	return out
 }
 
 // externalCardNow 卡片上算还会不会自己重推用的时钟（卡片不经流水线，测试里换掉）。

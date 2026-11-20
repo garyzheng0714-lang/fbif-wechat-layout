@@ -232,6 +232,8 @@ type robotLaneResult struct {
 	// ActionID 这个结论出自分发服务的哪一次发布动作。
 	ActionID  string
 	Uncertain bool
+	// LoginRequired 分发服务说这个号在服务器上没登录。
+	LoginRequired bool
 }
 
 // robotLaneResultOf 分发服务的一次回答（存草稿、发布或 GET）落到这条 lane 上是什么：发布中、审核中的看
@@ -253,7 +255,7 @@ func robotSaveResultOf(record robotDraftRecord, err error, profile distributionP
 		}
 		return robotLaneResult{State: publishExternalDistributionPublishing, Record: record, Saved: true, Publish: true}
 	case errors.As(err, &rejected):
-		return robotLaneResult{State: publishExternalDistributionFailed, Reason: robotRejectedReason(rejected, profile, "没存草稿")}
+		return robotLaneResult{State: publishExternalDistributionFailed, Reason: robotRejectedReason(rejected, profile, "没存草稿"), LoginRequired: rejected.Code == robotLoginRequired}
 	case errors.As(err, &reconcile):
 		return robotLaneResult{State: publishExternalDistributionReconciliationRequired, Reason: reconcile.Message}
 	case errors.Is(err, errRobotDraftNotFound):
@@ -293,7 +295,10 @@ func robotPublishResultOf(lane publishExternalLane, record robotDraftRecord, err
 					ActionID: robotRecordActionID(rejected.Record),
 				}
 			}
-			return robotLaneResult{State: publishExternalDistributionFailed, Reason: robotRejectedReason(rejected, profile, "没发布"), ActionID: robotRecordActionID(rejected.Record)}
+			return robotLaneResult{
+				State: publishExternalDistributionFailed, Reason: robotRejectedReason(rejected, profile, "没发布"),
+				ActionID: robotRecordActionID(rejected.Record), LoginRequired: rejected.Code == robotLoginRequired,
+			}
 		case errors.Is(err, errRobotDraftNotFound):
 			return robotLaneResult{State: publishExternalDistributionReconciliationRequired, Reason: "分发工具里查不到这篇草稿的记录；请到" + profile.Name + "后台核对"}
 		case errors.As(err, &uncertain) && uncertain.Record != nil:
@@ -429,11 +434,14 @@ func robotRecordError(record robotDraftRecord, fallback string) string {
 	return fallback
 }
 
+// robotLoginRequired 分发服务说这个号在服务器上没登录的错误码。
+const robotLoginRequired = "login_required"
+
 // robotRejectedReason 分发服务没动手时卡片上那句；what 是「没存草稿」「没发布」。
 func robotRejectedReason(err *robotRejectedError, profile distributionPlatform, what string) string {
 	switch {
-	case err.Code == "login_required":
-		return "服务器上的" + profile.Name + "没登录，请在分发工具的远程画面里登录后重新同步"
+	case err.Code == robotLoginRequired:
+		return "服务器上的" + profile.Name + "没登录，登好后系统自己重新同步"
 	case err.Status == 401:
 		return "分发工具不认这个接口 token（" + distributionAPITokenEnv + "），请查配置后重新同步"
 	default:
@@ -447,6 +455,7 @@ func applyRobotLaneResult(l *publishExternalLane, result robotLaneResult, profil
 	l.Error = robotLaneReason(result.Reason)
 	l.Remark = l.Error
 	l.CompletedAt = now
+	l.LoginRequired = result.LoginRequired
 	if result.ActionID != "" {
 		l.ActionID = result.ActionID
 	}
@@ -475,7 +484,8 @@ func robotLaneReason(reason string) string {
 
 // robotLaneResultSame 结论和 lane 上记的一样（发布中还在做、审核中还在审）：不写盘、不刷卡。
 func robotLaneResultSame(lane publishExternalLane, result robotLaneResult) bool {
-	return lane.State == result.State && lane.Error == robotLaneReason(result.Reason) && (result.URL == "" || result.URL == lane.URL)
+	return lane.State == result.State && lane.Error == robotLaneReason(result.Reason) && lane.LoginRequired == result.LoginRequired &&
+		(result.URL == "" || result.URL == lane.URL)
 }
 
 // robotDraftFidelity 分发服务存完草稿当场重新打开读回，与送去的正文逐项比；这就是这条 lane 的保真核对。

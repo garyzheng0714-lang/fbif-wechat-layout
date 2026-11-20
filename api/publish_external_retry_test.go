@@ -191,6 +191,120 @@ func TestExternalAutoRetryLeavesAlone(t *testing.T) {
 	}
 }
 
+// TestExternalLoginRequiredWaitsForLogin 2026-11-20 腾讯号在分发服务器上掉登录一周没人扫码：每天还去开一遍登录页，
+// 告警按篇一天天往上加（failed_jobs_recent 2→5），过了 7 天的两篇悄悄不推了。号没登录是号的事：等着的篇不按退避去碰平台、
+// 不算失败，每个号只报一条 external_login_required（带人话和怎么办）；过了 7 天也不丢；中台送来这次失败之后查到的「已登录」
+// 就马上接着推（晚上等到 9 点），不用人点。
+func TestExternalLoginRequiredWaitsForLogin(t *testing.T) {
+	account := testArticleAccount(testBaijiaAccountID, "baijiahao", true)
+	account.Login, account.LoginCheckedAt = externalAccountLoggedIn, newCSTClock("2026-11-12 09:00").now.UTC()
+	setTestExternalAccounts(t, account)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	env := newPublishTestEnv(t)
+	clock := useRetryClock(t, env, "2026-11-12 10:00")
+	robot := useFakeRobot(env)
+	robot.saveErr = &robotRejectedError{Status: 503, Code: robotLoginRequired, Message: "没登录"}
+	var jobs []publishJob
+	for _, key := range []string{"site:login-a", "site:login-b"} {
+		job := createPublishedDistributionJobWithKey(t, env, key, "FBIF食品饮料创新")
+		markAutoPending(t, env, job.ID, publishExternalAutoKindPublish)
+		jobs = append(jobs, job)
+	}
+	env.pipeline.runExternalAutoDistribution()
+	for _, job := range jobs {
+		if lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID); lane.State != publishExternalDistributionFailed || !lane.LoginRequired {
+			t.Fatalf("没登录记下来：%+v", lane)
+		}
+	}
+	// 分发服务把「要登录」写回表格，中台送过来。
+	account.Login, account.LoginCheckedAt = "要登录", clock.now.UTC()
+	setTestExternalAccounts(t, account)
+
+	wantAlert := "external_login_required:baijiahao:2"
+	checkWaiting := func(when string) {
+		t.Helper()
+		status := currentPublishMonitoring(env.store, false, clock.now)
+		hint := status.AlertHints[wantAlert]
+		if fmt.Sprint(status.AlertIssues) != "["+wantAlert+"]" || status.FailedRecent != 0 || status.Failed != 0 ||
+			!strings.Contains(hint.Meaning, fmt.Sprintf("2 篇原创停着没同步（#%d、#%d）", jobs[0].ID, jobs[1].ID)) ||
+			!strings.Contains(hint.Action, "cli.mjs login "+testBaijiaAccountID) {
+			t.Fatalf("%s：每个号只报一条、带人话和怎么办，不算失败：%+v", when, status)
+		}
+		body := distributionSectionJSON(t, buildReviewDoneCard(mustJob(t, env, jobs[0].ID)))
+		if strings.Contains(body, "自动重试") || !strings.Contains(body, "没登录，登好后系统自己重新同步") {
+			t.Fatalf("%s：卡片说登好后自己同步，不写几点重试: %s", when, body)
+		}
+	}
+	checkWaiting("刚失败")
+	for _, when := range []string{"2026-11-12 10:10", "2026-11-12 14:00", "2026-11-13 09:00", "2026-11-20 10:00"} {
+		clock.set(when)
+		env.pipeline.retryExternalLanes()
+		if len(robot.saves) != 2 {
+			t.Fatalf("%s：没登好不去碰平台：%d", when, len(robot.saves))
+		}
+	}
+	checkWaiting("过了 7 天")
+
+	// 晚上有人扫码登好：等到 9 点再推。
+	clock.set("2026-11-20 22:00")
+	account.Login, account.LoginCheckedAt = externalAccountLoggedIn, clock.now.UTC()
+	setTestExternalAccounts(t, account)
+	robot.saveErr = nil
+	env.pipeline.retryExternalLanes()
+	if len(robot.saves) != 2 {
+		t.Fatalf("晚上不推：%d", len(robot.saves))
+	}
+	if status := currentPublishMonitoring(env.store, false, clock.now); len(status.AlertIssues) != 0 || status.Failed != 0 {
+		t.Fatalf("登好了、等着推的不告警：%+v", status)
+	}
+	clock.set("2026-11-21 09:00")
+	env.pipeline.retryExternalLanes()
+	for _, job := range jobs {
+		lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID)
+		if lane.State != publishExternalDistributionSucceeded || lane.LoginRequired || lane.RequestedBy != publishExternalAutoActor {
+			t.Fatalf("登好后接着推出去：%+v", lane)
+		}
+	}
+	if len(robot.saves) != 4 {
+		t.Fatalf("两篇各推一次：%d", len(robot.saves))
+	}
+	if status := currentPublishMonitoring(env.store, false, clock.now); len(status.AlertIssues) != 0 {
+		t.Fatalf("推出去了告警清掉：%+v", status)
+	}
+}
+
+// TestExternalLoginWaitEdges 中台没送登录状态的照普通退避；「已登录」是失败之前查的不算登好；超过 30 天的不再等；
+// 2026-11-20 之前没记 LoginRequired 的按卡片上那句认。
+func TestExternalLoginWaitEdges(t *testing.T) {
+	now := newCSTClock("2026-11-20 10:00").now
+	lane := testRobotLaneIn(1, publishExternalDistributionFailed)
+	lane.RequestedBy, lane.RequestedAt, lane.CompletedAt = "ou_reviewer_1", "2026-11-13T01:00:00Z", "2026-11-19T07:00:00Z"
+	lane.Error = "服务器上的腾讯号没登录，请在分发工具的远程画面里登录后重新同步"
+	account := testArticleAccount(testBaijiaAccountID, "baijiahao", false)
+	if got := externalLaneLogin(lane, account, now); got != externalLoginNone {
+		t.Fatalf("中台没送登录状态照普通退避：%v", got)
+	}
+	account.Login, account.LoginCheckedAt = externalAccountLoggedIn, time.Date(2026, 11, 19, 6, 0, 0, 0, time.UTC)
+	if got := externalLaneLogin(lane, account, now); got != externalLoginWaiting {
+		t.Fatalf("旧 lane 按那句认；「已登录」是失败之前查的，还在等：%v", got)
+	}
+	account.LoginCheckedAt = time.Date(2026, 11, 20, 1, 0, 0, 0, time.UTC)
+	if got := externalLaneLogin(lane, account, now); got != externalLoginBack {
+		t.Fatalf("失败之后查到登着：%v", got)
+	}
+	if at, ok := externalLaneNextAutoRetry(lane, account, now); !ok || !at.Equal(now.UTC()) {
+		t.Fatalf("登好了马上推，不管 7 天：%v %v", at, ok)
+	}
+	if got := externalLaneLogin(lane, account, newCSTClock("2026-12-14 10:00").now); got != externalLoginNone {
+		t.Fatalf("超过 30 天不再等：%v", got)
+	}
+	other := lane
+	other.Error = "分发工具没存草稿：封面太小"
+	if got := externalLaneLogin(other, account, now); got != externalLoginNone {
+		t.Fatalf("别的原因照普通退避：%v", got)
+	}
+}
+
 func TestExternalAutoRetryDaytime(t *testing.T) {
 	for in, want := range map[string]string{
 		"2026-11-12 12:30": "11-12 12:30",

@@ -62,6 +62,9 @@ type publishExternalLane struct {
 	AutoRetries int `json:"auto_retries,omitempty"`
 	// DraftAttempt 平台上第几篇草稿：读回没对上、按现在的内容另存一篇时加一，幂等键跟着换（robotIdempotencyKey）。0、1 都是第一篇。
 	DraftAttempt int `json:"draft_attempt,omitempty"`
+	// LoginRequired 这次没成是因为分发服务器上这个号没登录（分发服务回 login_required）：等号登好了系统自己接着推，
+	// monitoring 按号报一条（publish_external_retry.go）。
+	LoginRequired bool `json:"login_required,omitempty"`
 }
 
 func externalLaneIndex(job publishJob, accountID string) int {

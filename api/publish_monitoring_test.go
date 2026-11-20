@@ -120,6 +120,38 @@ func TestPublishMonitoringSeparatesBusyDegradedAndUnhealthy(t *testing.T) {
 	}
 }
 
+// TestPublishMonitoringAlertsSayWhatToDo 每条告警都带人话和怎么办（alert_hints），看门狗照着发：2026-11-20 看门狗自己那张
+// 对照表里没有 failed_jobs_recent，私信里一周都只有机器码。人话只写在排版工具这一处，加告警忘了写这里就过不了。
+func TestPublishMonitoringAlertsSayWhatToDo(t *testing.T) {
+	hour := int64(time.Hour / time.Second)
+	status := publishMonitoringStatus{
+		StoreValid: true, WorkersPaused: true, AlertIssues: []string{}, AlertHints: map[string]publishMonitoringHint{},
+		Processing: 1, OldestProcessingAgeSeconds: hour, OldestExternalPublishingAgeSeconds: hour, OldestExternalReviewingAgeSeconds: 48 * hour,
+		OldestQueueAgeSeconds: hour, NotificationPending: 1, OldestNotificationAgeSeconds: hour, NotificationErrors: 1, NotificationDeadLetters: 1,
+		ReviewCardsMissing: 1, DuplicateSourceKeys: 1, FailedRecent: 1, failedUnresolved: 1, ReconciliationRequired: 1,
+		OldestReconciliationAgeSeconds: hour, ContentConflicts: 1, FoodTalksCredentialInvalid: true, ExternalFidelityMismatches: 1,
+		ExternalFidelityUnavailable: 1, StatusCallbackDeadLetters: 1,
+	}
+	status.noteLoginWait(externalAccount{ID: "recTencent", Platform: "tencent", Label: "腾讯号"}, 383)
+	finalizePublishMonitoring(&status)
+	if len(status.AlertIssues) < 14 {
+		t.Fatalf("每类告警都该出现：%v", status.AlertIssues)
+	}
+	for _, issue := range status.AlertIssues {
+		if hint := status.AlertHints[issue]; strings.TrimSpace(hint.Meaning) == "" || strings.TrimSpace(hint.Action) == "" {
+			t.Errorf("告警 %s 没写人话或怎么办：%+v", issue, hint)
+		}
+	}
+	if len(status.AlertHints) != len(status.AlertIssues) {
+		t.Fatalf("人话只给告警：%d 条人话、%d 条告警", len(status.AlertHints), len(status.AlertIssues))
+	}
+	quiet := currentPublishMonitoring(newPublishJobStore(t.TempDir()+"/jobs.json"), false, time.Now())
+	raw, err := json.Marshal(quiet)
+	if err != nil || !strings.Contains(string(raw), `"alert_hints":{}`) {
+		t.Fatalf("没告警时 alert_hints 也写出空的：%s %v", raw, err)
+	}
+}
+
 func TestPublishMonitoringUsesExternalIntentAgeAcrossResultChecks(t *testing.T) {
 	t.Setenv(deploymentWritesPausedEnv, "0")
 	store := newPublishJobStore(filepath.Join(t.TempDir(), "jobs.json"))

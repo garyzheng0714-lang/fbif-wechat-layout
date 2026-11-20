@@ -38,6 +38,10 @@ type externalAccount struct {
 	Source     string `json:"source"`
 	NotifyChat string `json:"notify_chat,omitempty"`
 	Auto       bool   `json:"auto,omitempty"`
+	// Login 分发服务器上这个号登着没有（中台送来的「服务器登录」：已登录、要登录；没送是空），LoginCheckedAt 是那次查的时间
+	// （「最近检查」）。只用来判断因为没登录停着的 lane 能不能接着推（publish_external_retry.go）。
+	Login          string    `json:"login,omitempty"`
+	LoginCheckedAt time.Time `json:"login_checked_at,omitzero"`
 	// Label 卡片、改稿页、提醒里叫它什么：平台名；同一平台不止一个号时用表里的账号名。不落盘，读出时算。
 	Label string `json:"-"`
 	// platform 取账号目录时一并记下的平台限制，一次操作里卡片、检查、推送都用这一份。不落盘。

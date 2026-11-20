@@ -55,6 +55,11 @@ type publishMonitoringStatus struct {
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
 	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
 	AlertIssues []string `json:"alert_issues"`
+	// alert_hints 每条 alert_issues 出了什么事、怎么办（键就是 alert_issues 里那一条）。人话只写在这里，
+	// 看门狗照着发，不在那边另配一张对照表（2026-11-20：看门狗表里没有 failed_jobs_recent，私信里只有机器码）。
+	AlertHints map[string]publishMonitoringHint `json:"alert_hints"`
+	// 分发服务器上没登录的号，每个号一条；等它登录的篇不算失败（publish_external_retry.go）。
+	ExternalLoginRequired []publishMonitoringLogin `json:"external_login_required,omitempty"`
 
 	failedUnresolved int
 	// nextChange 下一个只靠时间流逝就可能让告警翻转的时刻（处理中满 20 分钟、近期失败满 24 小时……）；
@@ -74,6 +79,22 @@ type publishMonitoringSignal struct {
 	condition bool
 	message   string
 	levels    publishMonitoringLevel
+	// hint 告警级的必须有（TestPublishMonitoringAlertsSayWhatToDo）。
+	hint publishMonitoringHint
+}
+
+// publishMonitoringHint 一条告警给人看的：出了什么事、怎么办。
+type publishMonitoringHint struct {
+	Meaning string `json:"meaning"`
+	Action  string `json:"action"`
+}
+
+// publishMonitoringLogin 一个在分发服务器上没登录的号，和等它的几篇。
+type publishMonitoringLogin struct {
+	AccountID string  `json:"account_id"`
+	Platform  string  `json:"platform"`
+	Label     string  `json:"label"`
+	Jobs      []int64 `json:"jobs"`
 }
 
 // changesWhenOlderThan 一件事现在 age 秒、满 limit 才算告警：记下它跨过去的那一刻。已经跨过去的不用记。
@@ -101,6 +122,7 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 		StoreValid:    true,
 		WorkersPaused: publishWorkersPaused(),
 		AlertIssues:   []string{},
+		AlertHints:    map[string]publishMonitoringHint{},
 
 		FoodTalksCredentialInvalid: credentialInvalid,
 	}
@@ -109,6 +131,9 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 		status.StoreValid = false
 		status.Issues = []string{"publish_store_invalid"}
 		status.AlertIssues = []string{"publish_store_invalid"}
+		status.AlertHints["publish_store_invalid"] = publishMonitoringHint{
+			Meaning: "排版工具读不了自己的任务库", Action: "查排版工具日志里读 data/publish-jobs.json 的报错",
+		}
 		status.Health = "unhealthy"
 		return status
 	}
@@ -226,8 +251,15 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 		if lane.State != publishExternalDistributionFailed && lane.State != publishExternalDistributionRejected {
 			continue
 		}
-		// 系统还会自己重推的（前 3 次退避没用完）先不算失败：连续 3 次没成才找人。
-		if externalLaneAwaitingAutoRetry(job, lane, now) {
+		outlook := externalLaneOutlookOf(job, lane, now)
+		// 号没登录停着的不算这一篇失败：按号报一条，等到 30 天。
+		if outlook.Login == externalLoginWaiting {
+			status.noteLoginWait(outlook.Target, job.ID)
+			status.changesWhenOlderThan(now, publishMonitoringAge(now, lane.RequestedAt), externalLoginWaitWindow)
+			continue
+		}
+		// 系统还会自己重推的（前 3 次退避没用完、号刚登好）先不算失败：连续 3 次没成才找人。
+		if outlook.Retrying {
 			// 过了 7 天系统就不再自己重推，那一刻起算失败。
 			status.changesWhenOlderThan(now, publishMonitoringAge(now, lane.RequestedAt), externalAutoRetryWindow)
 			continue
@@ -301,30 +333,45 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 	// 健康的含义是业务闭环已完成，不是“进程还活着”。仍在处理或
 	// 卡在 outbox 的任务必须进 issues，超时后才升级为 alert。
 	signals := []publishMonitoringSignal{
-		{status.WorkersPaused, "deployment_writes_paused", publishMonitoringIssue | publishMonitoringAlert},
-		{status.Processing > 0, fmt.Sprintf("business_processing:%d", status.Processing), publishMonitoringIssue},
-		{status.NotificationPending > 0, fmt.Sprintf("review_notification_pending:%d", status.NotificationPending), publishMonitoringIssue},
-		{status.OldestProcessingAgeSeconds > int64(publishProcessingWarningAfter/time.Second), fmt.Sprintf("processing_slow:%ds", status.OldestProcessingAgeSeconds), publishMonitoringWarning},
-		{status.OldestProcessingAgeSeconds > int64(publishProcessingCriticalAfter/time.Second), fmt.Sprintf("processing_stale:%ds", status.OldestProcessingAgeSeconds), publishMonitoringAlert},
-		{status.OldestExternalPublishingAgeSeconds > int64(publishExternalPublishingCriticalAfter/time.Second), fmt.Sprintf("external_publishing_stale:%ds", status.OldestExternalPublishingAgeSeconds), publishMonitoringAlert},
-		{status.OldestExternalReviewingAgeSeconds > int64(publishExternalReviewingWarningAfter/time.Second), fmt.Sprintf("external_reviewing_slow:%ds", status.OldestExternalReviewingAgeSeconds), publishMonitoringWarning},
-		{status.OldestQueueAgeSeconds > int64(publishQueueCriticalAfter/time.Second), fmt.Sprintf("queue_stale:%ds", status.OldestQueueAgeSeconds), publishMonitoringAlert},
-		{status.OldestNotificationAgeSeconds > int64(publishNotificationCriticalAfter/time.Second), fmt.Sprintf("notification_outbox_stale:%ds", status.OldestNotificationAgeSeconds), publishMonitoringIssue | publishMonitoringAlert},
-		{status.NotificationErrors > 0, fmt.Sprintf("notification_errors:%d", status.NotificationErrors), publishMonitoringIssue | publishMonitoringWarning},
-		{status.NotificationDeadLetters > 0, fmt.Sprintf("notification_dead_letters:%d", status.NotificationDeadLetters), publishMonitoringIssue | publishMonitoringAlert},
-		{status.ReviewCardsMissing > 0, fmt.Sprintf("review_cards_missing:%d", status.ReviewCardsMissing), publishMonitoringIssue | publishMonitoringAlert},
-		{status.DuplicateSourceKeys > 0, fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys), publishMonitoringIssue | publishMonitoringAlert},
-		{status.FailedRecent > 0, fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent), publishMonitoringIssue | publishMonitoringAlert},
-		{status.failedUnresolved > 0, fmt.Sprintf("failed_jobs_unresolved:%d", status.failedUnresolved), publishMonitoringIssue | publishMonitoringAlert},
-		{status.ReconciliationRequired > 0, fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired), publishMonitoringIssue | publishMonitoringWarning},
-		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert},
-		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert},
-		{status.FoodTalksCredentialInvalid, "foodtalks_credential_invalid", publishMonitoringIssue | publishMonitoringAlert},
+		{status.WorkersPaused, "deployment_writes_paused", publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"排版工具暂停了写入（部署时会暂停）", "部署完会自己恢复；部署早结束了还在报，查部署日志和 " + deploymentWritesPausedEnv}},
+		{status.Processing > 0, fmt.Sprintf("business_processing:%d", status.Processing), publishMonitoringIssue, publishMonitoringHint{}},
+		{status.NotificationPending > 0, fmt.Sprintf("review_notification_pending:%d", status.NotificationPending), publishMonitoringIssue, publishMonitoringHint{}},
+		{status.OldestProcessingAgeSeconds > int64(publishProcessingWarningAfter/time.Second), fmt.Sprintf("processing_slow:%ds", status.OldestProcessingAgeSeconds), publishMonitoringWarning, publishMonitoringHint{}},
+		{status.OldestProcessingAgeSeconds > int64(publishProcessingCriticalAfter/time.Second), fmt.Sprintf("processing_stale:%ds", status.OldestProcessingAgeSeconds), publishMonitoringAlert,
+			publishMonitoringHint{"有文章处理了 20 分钟还没完（排版、发 FoodTalks、同步第三方平台或重抓原文）", "在管理后台找处理中的那篇，看排版工具日志卡在哪一步"}},
+		{status.OldestExternalPublishingAgeSeconds > int64(publishExternalPublishingCriticalAfter/time.Second), fmt.Sprintf("external_publishing_stale:%ds", status.OldestExternalPublishingAgeSeconds), publishMonitoringAlert,
+			publishMonitoringHint{"有文章在第三方平台「发布中」30 分钟还没出结果", "看审核卡上那个平台的状态和分发工具日志"}},
+		{status.OldestExternalReviewingAgeSeconds > int64(publishExternalReviewingWarningAfter/time.Second), fmt.Sprintf("external_reviewing_slow:%ds", status.OldestExternalReviewingAgeSeconds), publishMonitoringWarning, publishMonitoringHint{}},
+		{status.OldestQueueAgeSeconds > int64(publishQueueCriticalAfter/time.Second), fmt.Sprintf("queue_stale:%ds", status.OldestQueueAgeSeconds), publishMonitoringAlert,
+			publishMonitoringHint{"有文章排队 15 分钟还没开始处理", "看排版工具的处理进程在不在跑、日志里有没有报错"}},
+		{status.OldestNotificationAgeSeconds > int64(publishNotificationCriticalAfter/time.Second), fmt.Sprintf("notification_outbox_stale:%ds", status.OldestNotificationAgeSeconds), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"有审核卡或提醒 10 分钟还没发出去", "查排版工具日志里发飞书消息的报错"}},
+		{status.NotificationErrors > 0, fmt.Sprintf("notification_errors:%d", status.NotificationErrors), publishMonitoringIssue | publishMonitoringWarning, publishMonitoringHint{}},
+		{status.NotificationDeadLetters > 0, fmt.Sprintf("notification_dead_letters:%d", status.NotificationDeadLetters), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"有审核卡或提醒发了多次都没发出去，已不再重试", "查排版工具日志里发飞书消息失败的原因，修好后在管理后台重发"}},
+		{status.ReviewCardsMissing > 0, fmt.Sprintf("review_cards_missing:%d", status.ReviewCardsMissing), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"有文章在等审核，却没发出审核卡", "查排版工具日志，在管理后台补发审核卡"}},
+		{status.DuplicateSourceKeys > 0, fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"同一篇原文进了两个任务", "在管理后台找出重复的任务，只留一个"}},
+		{status.FailedRecent > 0, fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{fmt.Sprintf("最近 24 小时有 %d 篇没做成（排版、发布、重抓原文，或同步第三方平台自己重推 3 次都没成）", status.FailedRecent),
+				"在管理后台看失败原因；第三方平台的看审核卡上那一行"}},
+		{status.failedUnresolved > 0, fmt.Sprintf("failed_jobs_unresolved:%d", status.failedUnresolved), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"有文章发布失败、还没处理", "在管理后台看原因并重试"}},
+		{status.ReconciliationRequired > 0, fmt.Sprintf("reconciliation_backlog:%d", status.ReconciliationRequired), publishMonitoringIssue | publishMonitoringWarning, publishMonitoringHint{}},
+		{status.ReconciliationRequired > 0 && status.OldestReconciliationAgeSeconds > int64(publishReconciliationCriticalAfter/time.Second), fmt.Sprintf("reconciliation_stale:%ds", status.OldestReconciliationAgeSeconds), publishMonitoringAlert,
+			publishMonitoringHint{"有任务「待核对」超过 30 分钟", "看审核卡上写「待核对」的地方，到平台后台核对后处理"}},
+		{status.ContentConflicts > 0, fmt.Sprintf("content_conflicts:%d", status.ContentConflicts), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"有文章审核或发布后又来了更新的原文，没有自动替换", "在管理后台看这篇的冲突说明，决定用不用新内容"}},
+		{status.FoodTalksCredentialInvalid, "foodtalks_credential_invalid", publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{"FoodTalks 凭证失效（最近一次鉴权回 401），文章发不到 FoodTalks", "在中台换 FoodTalks 的凭证"}},
 		// 草稿读回对不上（平台编辑器改了），或分发服务没读回：要有人看，但不是 P0、不挡 ready。
-		{status.ExternalFidelityMismatches > 0, fmt.Sprintf("external_fidelity_mismatch:%d", status.ExternalFidelityMismatches), publishMonitoringWarning},
-		{status.ExternalFidelityUnavailable > 0, fmt.Sprintf("external_fidelity_unavailable:%d", status.ExternalFidelityUnavailable), publishMonitoringWarning},
-		{status.StatusCallbackDeadLetters > 0, fmt.Sprintf("status_callback_dead_letters:%d", status.StatusCallbackDeadLetters), publishMonitoringWarning},
+		{status.ExternalFidelityMismatches > 0, fmt.Sprintf("external_fidelity_mismatch:%d", status.ExternalFidelityMismatches), publishMonitoringWarning, publishMonitoringHint{}},
+		{status.ExternalFidelityUnavailable > 0, fmt.Sprintf("external_fidelity_unavailable:%d", status.ExternalFidelityUnavailable), publishMonitoringWarning, publishMonitoringHint{}},
+		{status.StatusCallbackDeadLetters > 0, fmt.Sprintf("status_callback_dead_letters:%d", status.StatusCallbackDeadLetters), publishMonitoringWarning, publishMonitoringHint{}},
 	}
+	signals = append(signals, status.loginSignals()...)
 	appendPublishMonitoringSignals(status, signals)
 	sort.Strings(status.Issues)
 	sort.Strings(status.Warnings)
@@ -356,8 +403,54 @@ func appendPublishMonitoringSignals(status *publishMonitoringStatus, signals []p
 		}
 		if signal.levels&publishMonitoringAlert != 0 {
 			status.AlertIssues = append(status.AlertIssues, signal.message)
+			status.AlertHints[signal.message] = signal.hint
 		}
 	}
+}
+
+// noteLoginWait 这篇在等这个号登录。
+func (s *publishMonitoringStatus) noteLoginWait(target externalAccount, jobID int64) {
+	for i := range s.ExternalLoginRequired {
+		if entry := &s.ExternalLoginRequired[i]; entry.AccountID == target.ID {
+			entry.Jobs = append(entry.Jobs, jobID)
+			return
+		}
+	}
+	s.ExternalLoginRequired = append(s.ExternalLoginRequired, publishMonitoringLogin{
+		AccountID: target.ID, Platform: target.Platform, Label: target.label(), Jobs: []int64{jobID},
+	})
+}
+
+// loginSignals 每个没登录的号一条告警：external_login_required:<平台>:<篇数>（一个平台不止一个号时再带上号的编号）。
+func (s *publishMonitoringStatus) loginSignals() []publishMonitoringSignal {
+	sort.Slice(s.ExternalLoginRequired, func(i, j int) bool {
+		return s.ExternalLoginRequired[i].AccountID < s.ExternalLoginRequired[j].AccountID
+	})
+	perPlatform := map[string]int{}
+	for _, entry := range s.ExternalLoginRequired {
+		perPlatform[entry.Platform]++
+	}
+	out := make([]publishMonitoringSignal, 0, len(s.ExternalLoginRequired))
+	for _, entry := range s.ExternalLoginRequired {
+		sort.Slice(entry.Jobs, func(i, j int) bool { return entry.Jobs[i] < entry.Jobs[j] })
+		where := entry.Platform
+		if perPlatform[entry.Platform] > 1 {
+			where += ":" + entry.AccountID
+		}
+		ids := make([]string, len(entry.Jobs))
+		for i, id := range entry.Jobs {
+			ids[i] = fmt.Sprintf("#%d", id)
+		}
+		out = append(out, publishMonitoringSignal{
+			true, fmt.Sprintf("external_login_required:%s:%d", where, len(entry.Jobs)), publishMonitoringIssue | publishMonitoringAlert,
+			publishMonitoringHint{
+				Meaning: fmt.Sprintf("%s在分发服务器上没登录，%d 篇原创停着没同步（%s）", entry.Label, len(entry.Jobs), strings.Join(ids, "、")),
+				Action: fmt.Sprintf("在内部工具服务器上跑 docker exec fbif-distribution-browser node service/cli.mjs login %s，"+
+					"把打出的远程画面链接发给能扫码的人登录；登好后这几篇系统自己重新同步，不用点卡片", entry.AccountID),
+			},
+		})
+	}
+	return out
 }
 
 // publishExternalLaneEnteredAt lane 进入现在这个状态的时间（发布中、审核中按它算多久了）。
