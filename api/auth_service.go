@@ -69,6 +69,7 @@ type authService struct {
 	feishu           feishuProvider
 	tokens           feishuTokenSource   // nil：飞书应用没配，谁都授权不了
 	grants           *feishugrant.Grants // 本人飞书授权的路由；nil：飞书应用没配，或单元测试
+	blocklist        *agentBlocklist     // 智能体每次调用查的停用名单；nil：谁都不放
 	feishuExportJobs *feishuExportJobManager
 }
 

@@ -237,14 +237,14 @@ test('workflow preflights before staging, never rsyncs directly into live, and k
   }
 });
 
-// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）和飞书授权的封存钥匙 SSO_TOKEN_KEY 由中台本机代理写进
+// FBIF 中台统一管共用密钥（2026-10-26）：这 10 个变量（渲染服务 1 个）和飞书授权的封存钥匙 SSO_TOKEN_KEY、智能体停用名单的钥匙 SSO_HUB_KEY 由中台本机代理写进
 // /etc/fbif-hub/env/layout.env、render.env，systemd drop-in 让服务最后读、同名为准。CI 再从
 // GitHub Secrets 写一份，中台换值后 GitHub 那份就过期了，所以 CI 既不持有也不写它们。
 const HUB_LAYOUT_VARIABLES = [
   'CLOUDCONVERT_API_KEY', 'FEISHU_LOGIN_APP_SECRET', 'PUBLISH_ADMIN_SERVICE_TOKEN', 'RENDER_TOKEN',
   'DISTRIBUTION_API_TOKEN', 'FEISHU_APP_SECRET', 'FOODTALKS_TOKEN', 'HUB_KEY',
   'PUBLISH_SYNC_SERVICE_TOKEN', 'TIKHUB_API_KEY',
-  'SSO_TOKEN_KEY',
+  'SSO_TOKEN_KEY', 'SSO_HUB_KEY',
 ];
 
 test('deploy workflow neither holds nor writes hub-managed variables; readiness goes through the server', async () => {
@@ -264,9 +264,10 @@ test('deploy workflow neither holds nor writes hub-managed variables; readiness 
   }
   // 2026-11-10 换统一登录：本项目不再收密码，密码账号名单不再下发。
   assert.doesNotMatch(workflow, /AUTH_PASSWORD_USERS_B64/);
-  // 登录由入口统一拦截（2026-11-20），部署不再写任何登录变量；飞书授权的回调地址照写。
-  assert.doesNotMatch(workflow, /SSO_(?:REDIRECT_URL|HUB_URL|OUTBOX_FILE|ISSUER|CLIENT_ID|HUB_KEY|CENTER_)/);
+  // 登录由入口统一拦截（2026-11-20），部署不再写登录变量；智能体停用名单问中台的地址、飞书授权的回调地址照写。
+  assert.doesNotMatch(workflow, /SSO_(?:REDIRECT_URL|OUTBOX_FILE|ISSUER|CLIENT_ID|CENTER_)/);
   for (const line of [
+    'SSO_HUB_URL=http://127.0.0.1:13199/hub-auth/layout',
     'FEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback',
   ]) {
     assert.ok(workflow.includes(`${line}\\n`), `api.env 要写 ${line}`);

@@ -30,9 +30,6 @@ const (
 	accountCompanyCode = "account"
 	// legacyFeishuUserPrefix：2026-11-10 换统一登录前用飞书登录过的人，用户 ID 是 feishu:<open_id>，都是 FBIF 的。
 	legacyFeishuUserPrefix = "feishu:"
-	// agentSeenWithin：智能体拿的是自己的令牌、不经入口，离职、停用由登录中心在入口挡；所以要这个人这么多天内
-	// 在浏览器里经入口进来过（用户库 last_login_at），智能体才替他干活。离职的人进不来，最多再用这么久。
-	agentSeenWithin = 7 * 24 * time.Hour
 )
 
 func authUsersPath(rulesPath string) string {
@@ -109,8 +106,9 @@ func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]string{"error": message, "code": code})
 }
 
-// newRuntimeAuthService 装配用户库和本人飞书授权。飞书授权文件 feishu-grants.json 和用户库放同一个目录，
-// refresh_token 用 SSO_TOKEN_KEY 加密：还是原来那把，已经授权过的人不用重新授权（只是变量名沿用登录模板时的叫法）。
+// newRuntimeAuthService 装配用户库、智能体的停用名单和本人飞书授权，都放在用户库同一个目录。
+// 停用名单（agent_blocklist.go）用 SSO_HUB_URL、SSO_HUB_KEY 问中台，后台跟着 ctx 拉；
+// 飞书授权 feishu-grants.json 的 refresh_token 用 SSO_TOKEN_KEY 加密：还是原来那把，已经授权过的人不用重新授权（变量名沿用登录模板时的叫法）。
 func newRuntimeAuthService(ctx context.Context, rulesPath string) (*authService, error) {
 	config, err := authConfigFromEnvironment()
 	if err != nil {
@@ -121,13 +119,15 @@ func newRuntimeAuthService(ctx context.Context, rulesPath string) (*authService,
 	if err != nil {
 		return nil, err
 	}
-	if config.FeishuAppID == "" || config.FeishuSecret == "" || feishuGrantRedirectURL() == "" {
-		log.Printf("auth: 飞书应用没配全，谁都授权不了飞书（搜文档、导入、列群用不了）")
-		return service, nil
-	}
 	stateDir := filepath.Dir(usersPath)
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("auth: 建 %s: %w", stateDir, err)
+	}
+	service.blocklist = newAgentBlocklistFromEnv(filepath.Join(stateDir, "agent-blocklist.json"))
+	service.blocklist.Start(ctx)
+	if config.FeishuAppID == "" || config.FeishuSecret == "" || feishuGrantRedirectURL() == "" {
+		log.Printf("auth: 飞书应用没配全，谁都授权不了飞书（搜文档、导入、列群用不了）")
+		return service, nil
 	}
 	grants, err := feishugrant.New(ctx, feishugrant.Options{
 		Apps: map[string]feishugrant.App{"fbif": {
@@ -325,13 +325,10 @@ func feishuColleague(user authUser) bool {
 }
 
 // agentCheck 这个人现在能不能让智能体替他用排版工具（agent_mcp.go 每次调用、每次换令牌都问）：
-// 飞书登录的 FBIF 同事，并且 agentSeenWithin 内在浏览器里经入口进来过（离职、停用的人入口不放，就进不来）。
+// 飞书登录的 FBIF 同事，并且不在停用名单上。智能体的令牌不经入口，离职、停用由这里查（名单从没拉到过也不放）。
 func (s *authService) agentCheck(user authUser) error {
 	if !feishuColleague(user) {
 		return errors.New("只有用飞书登录的 FBIF 同事能让智能体用排版工具")
 	}
-	if user.LastLoginAt.IsZero() || s.now().Sub(user.LastLoginAt) > agentSeenWithin {
-		return fmt.Errorf("超过 %d 天没在浏览器里打开排版工具：先打开一次 %s/mp/fbif，再回来重试", int(agentSeenWithin/(24*time.Hour)), publishPreviewBaseURL())
-	}
-	return nil
+	return s.blocklist.Check(user.FeishuUnionID)
 }

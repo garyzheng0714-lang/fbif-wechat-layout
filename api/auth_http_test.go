@@ -104,6 +104,7 @@ func newTestAuthService(t *testing.T, provider feishuProvider) *authService {
 		t.Fatalf("newAuthService: %v", err)
 	}
 	service.tokens = &fakeFeishuTokens{tokens: map[string]string{}}
+	service.blocklist = &agentBlocklist{state: blocklistState{Synced: true, Entries: map[string]blockEntry{}}}
 	return service
 }
 
@@ -648,13 +649,12 @@ func TestFeishuGrantRequestsDocumentAndWikiScopes(t *testing.T) {
 	}
 }
 
-// 身份菜单的「接入智能体」（红线 51）：只给飞书登录的 FBIF 同事；智能体每次调用还要这个人 7 天内经入口进来过。
+// 身份菜单的「接入智能体」（红线 51）：只给飞书登录的 FBIF 同事；智能体每次调用还要查停用名单（从没拉到过不放）。
 func TestAgentCapabilityOnlyForFeishuColleagues(t *testing.T) {
 	service := newTestAuthService(t, &fakeFeishuProvider{})
-	now := service.now()
-	colleague := authUser{ID: fbifCompanyCode + ":on_a", AuthMode: authModeFeishu, FeishuUnionID: "on_a", Status: authUserActive, LastLoginAt: now.Add(-time.Hour)}
-	vendor := authUser{ID: "account:recVendor", AuthMode: authModePassword, Status: authUserActive, LastLoginAt: now}
-	noUnion := authUser{ID: fbifCompanyCode + ":on_b", AuthMode: authModeFeishu, Status: authUserActive, LastLoginAt: now}
+	colleague := authUser{ID: fbifCompanyCode + ":on_a", AuthMode: authModeFeishu, FeishuUnionID: "on_a", Status: authUserActive}
+	vendor := authUser{ID: "account:recVendor", AuthMode: authModePassword, Status: authUserActive}
+	noUnion := authUser{ID: fbifCompanyCode + ":on_b", AuthMode: authModeFeishu, Status: authUserActive}
 	if !service.agentCapable(colleague) || service.agentCapable(vendor) || service.agentCapable(noUnion) {
 		t.Fatalf("colleague=%v vendor=%v noUnion=%v", service.agentCapable(colleague), service.agentCapable(vendor), service.agentCapable(noUnion))
 	}
@@ -662,16 +662,18 @@ func TestAgentCapabilityOnlyForFeishuColleagues(t *testing.T) {
 		t.Fatalf("账号密码登录的不能接智能体：%v", err)
 	}
 	if err := service.agentCheck(colleague); err != nil {
-		t.Fatalf("近期来过的同事：%v", err)
+		t.Fatalf("不在名单上的同事：%v", err)
 	}
-	gone := colleague
-	gone.LastLoginAt = now.Add(-agentSeenWithin - time.Hour)
-	if err := service.agentCheck(gone); err == nil || !strings.Contains(err.Error(), "/mp/fbif") {
-		t.Fatalf("7 天没经入口来过（离职的人进不来）就不替他干活：%v", err)
+	service.blocklist.state.Entries["on_a"] = blockEntry{Reason: "离职"}
+	if err := service.agentCheck(colleague); err == nil || !strings.Contains(err.Error(), "停用") {
+		t.Fatalf("名单上的人不替他干活：%v", err)
 	}
-	never := colleague
-	never.LastLoginAt = time.Time{}
-	if err := service.agentCheck(never); err == nil {
-		t.Fatal("从没经入口来过不能用")
+	service.blocklist = &agentBlocklist{}
+	if err := service.agentCheck(colleague); err == nil {
+		t.Fatal("名单从没拉到过不能放")
+	}
+	service.blocklist = nil
+	if err := service.agentCheck(colleague); err == nil {
+		t.Fatal("没有名单不能放")
 	}
 }

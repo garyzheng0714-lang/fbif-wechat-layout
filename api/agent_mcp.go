@@ -128,7 +128,7 @@ func registerAgentEntry(mux *http.ServeMux, deps agentDeps) error {
 	return nil
 }
 
-// agentAllowed 这个人现在能不能让智能体替他用排版工具：在用户库里、没停用，并且是近期经入口进来过的飞书同事（agentCheck）。
+// agentAllowed 这个人现在能不能让智能体替他用排版工具：在用户库里、没停用，并且是不在停用名单上的飞书同事（agentCheck）。
 func (s *authService) agentAllowed(ctx context.Context, userID string) error {
 	user, ok, err := s.users.Get(userID)
 	if err != nil {

@@ -48,7 +48,7 @@ type authUser struct {
 	FeishuUnionID string    `json:"feishu_union_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-	// LastLoginAt 是最近一次经入口来过（每小时最多记一次）；智能体按它判断这个人还在不在（auth_login.go agentCheck）。
+	// LastLoginAt 是最近一次经入口来过（每小时最多记一次），规则后台的人员列表显示它。
 	LastLoginAt time.Time `json:"last_login_at,omitempty"`
 }
 

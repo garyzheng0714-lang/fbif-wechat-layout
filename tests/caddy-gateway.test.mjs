@@ -110,6 +110,11 @@ test('入口：页面和接口过登录，别的程序的路径不过且收不�
   atApp(await get('/api/publish/sync-status', { headers: { 'X-Publish-Sync-Token': 'x' }, method: 'POST' }), null);
   atApp(await get('/api/publish/jobs', { headers: { 'X-Publish-Admin-Token': 'x' } }), null);
   atApp(await get('/api/oss-upload', { headers: { Authorization: 'Bearer x' }, method: 'POST' }), null);
+  // 以前不登录也能调、现在要登录的接口（2026-11-20 逐个查过）：只有登录后的编辑器页面调；
+  // 排版程序取规则直连本机 127.0.0.1:9001，不经入口。
+  for (const path of ['/api/image-proxy?url=x', '/api/fetch-article', '/api/fetch-article-meta', '/api/rules/active', '/api/rules/presets']) {
+    assert.equal((await get(path)).status, 401, `${path} 没登录要被入口挡住`);
+  }
   for (const path of ['/api/publish/sync-status', '/api/oss-upload', '/api/auth/me', '/oauth/authorize', '/mp/fbif', '/app.html', '/']) {
     assert.equal((await get(path)).status, 401, `${path} 没登录要被入口挡住`);
   }

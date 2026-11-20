@@ -64,7 +64,7 @@ jobs:
           set -Eeuo pipefail
 
           # 所有必需配置必须在任何远端 live 写入前 fail loud。只打印变量名，绝不打印值。
-          # CLOUDCONVERT_API_KEY、FEISHU_LOGIN_APP_SECRET、PUBLISH_ADMIN_SERVICE_TOKEN、RENDER_TOKEN、SSO_TOKEN_KEY（飞书授权封存钥匙）
+          # CLOUDCONVERT_API_KEY、FEISHU_LOGIN_APP_SECRET、PUBLISH_ADMIN_SERVICE_TOKEN、RENDER_TOKEN、SSO_TOKEN_KEY（飞书授权封存钥匙）、SSO_HUB_KEY（智能体停用名单）
           # 由 FBIF 中台下发到服务器的 /etc/fbif-hub/env/layout.env、render.env，CI 不持有也不写；
           # 事务脚本 preflight 时查中台文件。
           for required in SSH_KEY KNOWN_HOSTS HOST USER DEPLOY_PATH RULE_SUPER_ADMIN_OPEN_IDS AUTH_SESSION_SECRET FEISHU_LOGIN_APP_ID; do
@@ -210,7 +210,7 @@ jobs:
 
           # publish.env 是手工维护的独立 EnvironmentFile，不在这里覆盖。中台下发的变量（上面 4 个和
           # publish.env 里原来的 6 个）只在中台文件里，systemd drop-in 让服务最后读它、同名为准。
-          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nRULE_SUPER_ADMIN_OPEN_IDS=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$RULE_SUPER_ADMIN_OPEN_IDS" "$AUTH_SESSION_SECRET" "$FEISHU_LOGIN_APP_ID" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "http://127.0.0.1:19096" | base64 -w 0)
+          ENV_CONTENT=$(printf 'ENV=production\nFBIF_CONFIG_SCHEMA_VERSION=1\nLIBREOFFICE_URL=%s\nLIBREOFFICE_TOKEN=%s\nRULE_SUPER_ADMIN_OPEN_IDS=%s\nAUTH_SESSION_SECRET=%s\nAUTH_USERS_PATH=/var/www/api/data/auth-users.json\nSSO_HUB_URL=http://127.0.0.1:13199/hub-auth/layout\nFEISHU_LOGIN_APP_ID=%s\nFEISHU_LOGIN_REDIRECT_URI=https://fbifmp-layout.foodtalks.cn/auth/feishu/fbif/qr-callback\nPUBLIC_DIR=%s\nWECHAT_UPLOAD_ORIGIN=%s\nWECHAT_UPLOAD_ENDPOINT=http://127.0.0.1:9000/api/wechat-upload\nRENDER_SERVICE_URL=%s\nDEPLOYMENT_WRITES_PAUSED=1\n' "$LIBREOFFICE_URL" "$LIBREOFFICE_TOKEN" "$RULE_SUPER_ADMIN_OPEN_IDS" "$AUTH_SESSION_SECRET" "$FEISHU_LOGIN_APP_ID" "${DEPLOY_PATH}" "https://fbifmp-layout.foodtalks.cn" "http://127.0.0.1:19096" | base64 -w 0)
           printf -v env_stage_command 'umask 077; base64 -d > %q' "$RELEASE_DIR/api.env"
           printf '%s' "$ENV_CONTENT" | ssh -i ~/.ssh/deploy_key "${USER}@${HOST}" "$env_stage_command"
           # 渲染服务的 RENDER_TOKEN 由中台下发到 /etc/fbif-hub/env/render.env，这里不写。

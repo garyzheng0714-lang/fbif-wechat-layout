@@ -43,8 +43,8 @@ func newAgentTestEnv(t *testing.T) *agentTestEnv {
 	env := &agentTestEnv{t: t, layout: newLayoutTestEnv(t), auth: newTestAuthService(t, nil)}
 	env.layout.node.check = articleCheckSource{Title: "标题", Text: articleCheckBody}
 	for _, u := range []authUser{
-		{ID: agentTestPerson, Name: "王小明", AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "union_me", LastLoginAt: env.auth.now()},
-		{ID: agentTestColleague, Name: "李四", AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "union_colleague", LastLoginAt: env.auth.now()},
+		{ID: agentTestPerson, Name: "王小明", AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "union_me"},
+		{ID: agentTestColleague, Name: "李四", AuthMode: authModeFeishu, Status: authUserActive, FeishuUnionID: "union_colleague"},
 	} {
 		mustSessionForUser(t, env.auth, u)
 	}
@@ -404,6 +404,19 @@ func TestAgentStopsWhenPersonDisabled(t *testing.T) {
 	resp := env.request(http.MethodPost, "/mcp", "", strings.NewReader(`{}`), map[string]string{"Content-Type": "application/json"})
 	if resp.StatusCode != http.StatusUnauthorized || !strings.Contains(resp.Header.Get("WWW-Authenticate"), "resource_metadata=") {
 		t.Fatalf("没带令牌要回 401 并指向元数据：%d %q", resp.StatusCode, resp.Header.Get("WWW-Authenticate"))
+	}
+}
+
+// 离职、停用（中台停用名单上）：浏览器那边入口挡，智能体已经拿到的令牌下一次调用、换令牌也进不来。
+func TestAgentStopsWhenPersonOnBlocklist(t *testing.T) {
+	env := newAgentTestEnv(t)
+	token := env.login(agentTestPerson)
+	if _, err := env.connect(token); err != nil {
+		t.Fatalf("上名单前连不上：%v", err)
+	}
+	env.auth.blocklist.state.Entries["union_me"] = blockEntry{Reason: "离职"}
+	if _, err := env.connect(token); err == nil {
+		t.Fatal("上了停用名单还能用")
 	}
 }
 
