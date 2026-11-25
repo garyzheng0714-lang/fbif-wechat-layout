@@ -125,8 +125,8 @@ func defaultMpBottomBlocksModuleV2() map[string]any {
 	// 旧 1000 案例推广块已下线，不再作为默认排版输出。
 	order := []any{"tip_title", "sp1", "tip_body", "sp2", "byline", "more_articles"}
 	// 原创三条（含「转载请在后台回复」，codex review #2），转载两条。
-	originalBody := textBlock("提示正文", "* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（ID：fbifmedia1）", false, 15, "#888888", "left")
-	repostBody := textBlock("提示正文", "* 本文为转载文章。\n* FBIF投稿与商务合作，联系Bobo（ID：fbifmedia1）", false, 15, "#888888", "left")
+	originalBody := textBlock("提示正文", "* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* 投稿与商务合作请在后台回复“商务合作”。", false, 15, "#888888", "left")
+	repostBody := textBlock("提示正文", "* 本文为转载文章。\n* 投稿与商务合作请在后台回复“商务合作”。", false, 15, "#888888", "left")
 	return map[string]any{
 		"schema_version":   2,
 		"enabled":          true,

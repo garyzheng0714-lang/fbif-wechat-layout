@@ -192,6 +192,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 署名图（mote_ref_author_card），推翻 v16/v17 的默认隐藏；单篇仍可按需关闭。
 // fbif v18→v19（2026-11-02）：Mote 作者默认加二级标题字号 16px（subheading_size），只给 Mote。
 // fbif v19→v20（2026-11-16）：底部提示正文「联系Bobo（微信：fbifmedia1）」改为「（ID：fbifmedia1）」。
+// foodtalks-mp v16→v17（2026-11-25）：FoodTalks食品资讯公众号提示里的商务合作句不再写「请联系Bobo」，
+// 改为「*投稿与商务合作请在后台回复“商务合作”。」（Bobo：不放微信号，怕被限流）；单独升版，不波及其他内置规则。
+// fbif v20→v21（2026-11-25）：底部提示正文不放微信号（Bobo：怕被限流），末行改为「投稿与商务合作请在后台回复“商务合作”。」。
 // v17→v18（2026-07-26）：ft-default 网站页脚默认开启（fbif_footer + 由它派生的
 // bottom_blocks）。旧默认 enabled=false 让页脚只能靠前台 localStorage override 打开，
 // 新环境静默丢页脚；仅覆盖 ft-default-v1。
@@ -207,8 +210,9 @@ func defaultRuleAccounts(now string) map[string]ruleAccount {
 // 仅覆盖 ft-default-v1。
 const currentBuiltinRuleVersion = 20
 const defaultBuiltinRuleVersion = 16
-const fbifBuiltinRuleVersion = 20
+const fbifBuiltinRuleVersion = 21
 const ftSeriesSiteBuiltinRuleVersion = 16
+const foodTalksMpBuiltinRuleVersion = 17
 
 func builtinVersionForDefaultRule(id string) int {
 	switch id {
@@ -218,6 +222,8 @@ func builtinVersionForDefaultRule(id string) int {
 		return currentBuiltinRuleVersion
 	case foodTalksSeriesSiteDefaultRulePresetID:
 		return ftSeriesSiteBuiltinRuleVersion
+	case foodTalksMpDefaultRulePresetID:
+		return foodTalksMpBuiltinRuleVersion
 	default:
 		return defaultBuiltinRuleVersion
 	}

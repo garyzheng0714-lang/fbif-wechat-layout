@@ -32,6 +32,26 @@ func TestStripWechatTrailerBlocksCutsFBIFTipFooter(t *testing.T) {
 	}
 }
 
+// 2026-11-25 底部提示不放微信号（Bobo：怕被限流），末行改为「投稿与商务合作请在后台回复“商务合作”。」：
+// 原创、转载两套新页脚后面就算没有「更多文章」也要认出来切掉，切漏了发布闸门也要拦住。
+func TestStripWechatTrailerBlocksCutsTipFooterWithoutWechatID(t *testing.T) {
+	for name, tip := range map[string][]string{
+		"原创": {"* 本文为FBIF原创，欢迎转发朋友圈；", "* 转载请在后台回复“转载”了解规则；", "* 投稿与商务合作请在后台回复“商务合作”。"},
+		"转载": {"* 本文为转载文章。", "* 投稿与商务合作请在后台回复“商务合作”。"},
+	} {
+		blocks := []Block{{K: "txt", Text: "正文。"}, {K: "txt", Text: "提示："}}
+		for _, line := range tip {
+			blocks = append(blocks, Block{K: "txt", Text: line})
+		}
+		if got := stripWechatTrailerBlocks(blocks); len(got) != 1 {
+			t.Fatalf("%s：应切在「提示：」之前，实际 %d 块", name, len(got))
+		}
+		if publishHTMLWechatTrailerLeak(tip[len(tip)-1]) == "" {
+			t.Fatalf("%s：发布闸门应拦住「%s」", name, tip[len(tip)-1])
+		}
+	}
+}
+
 // #294 重新同步（2026-10-30）：重抓回来的尾巴少了联系 Bobo 那行，只剩「本文为转载文章」也要认出是公众号页脚。
 func TestStripWechatTrailerBlocksCutsRepostTipWithoutContactLine(t *testing.T) {
 	blocks := []Block{

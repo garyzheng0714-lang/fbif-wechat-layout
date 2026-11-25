@@ -463,6 +463,22 @@ test('切尾：「提示：」后紧跟「本文为转载文章」也认作公�
   assert.equal(out.find(e => e.k === 'tip').rest_runs.map(r => r.text).join(''), '*本文为转载文章《T》，不代表FoodTalks立场，转载请联系出处。');
 });
 
+// 2026-11-25 公众号底部提示不放微信号（Bobo：怕被限流），末行改「投稿与商务合作请在后台回复“商务合作”。」：
+// 原创、转载两套新页脚后面没有「更多文章」也要整段切掉，换成网站口径声明。
+test('切尾：不带微信号的新版「提示：」页脚（原创、转载）也认作公众号页脚', () => {
+  const coop = p('* 投稿与商务合作请在后台回复“商务合作”。');
+  const cases = [
+    { tail: [p('提示：'), p('* 本文为FBIF原创，欢迎转发朋友圈；'), p('* 转载请在后台回复“转载”了解规则；'), coop], ctx: { isRepost: false, title: 'T' } },
+    { tail: [p('提示：'), p('* 本文为转载文章。'), coop], ctx: { isRepost: true, title: 'T', provenance: { original: false } } },
+  ];
+  for (const { tail, ctx } of cases) {
+    const out = applyFoodTalksBehavior([p('正文。'), ...tail], DEFAULT_CONFIG, ctx);
+    const texts = out.map(textOf).join('\n');
+    assert.doesNotMatch(texts, /提示：|后台回复|欢迎转发朋友圈/, '公众号「提示：」页脚切掉');
+    assert.equal(out.filter(e => e.k === 'tip').length, 1, '换成一段网站口径声明');
+  }
+});
+
 // 发布流程交来后台的判定（和 CMS 原创/转载同一个函数，认 AI 抽的出处和「本文转载自X」等写法），
 // 文末声明照它写：#19/#102/#119/#309/#311 正文只有「本文经授权转自《晚点LatePost》」这类写法，原先都写成了 FBIF 原创。
 test('文末声明：照发布流程交来的原创/转载判定写', () => {

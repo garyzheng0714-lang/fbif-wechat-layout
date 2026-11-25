@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -22,6 +23,9 @@ import (
 )
 
 const distributionGoldenDir = "testdata/distribution-golden"
+
+// 2026-11-25 Bobo：头条号、百家号、知乎号的提示都不放商务合作或微信号（公众号是「后台回复“商务合作”」，第三方平台没有后台可回）。
+var distributionContactRe = regexp.MustCompile(`商务合作|后台回复|联系Bobo|(?i:fbifmedia|FBIF_)|微信号?\s*[：:]`)
 
 type distributionGoldenSample struct {
 	Job        int64               `json:"job"`
@@ -52,6 +56,9 @@ func TestDistributionBlocksGolden(t *testing.T) {
 			got, err := distributionGoldenOutput(t, sample)
 			if err != nil {
 				t.Fatalf("#%d 组装失败：%v", sample.Job, err)
+			}
+			if m := distributionContactRe.FindString(distributionBlocksText(got.Blocks)); m != "" {
+				t.Errorf("#%d 外发正文里有联系方式「%s」：第三方平台的提示不放商务合作或微信号", sample.Job, m)
 			}
 			encoded := encodeDistributionGolden(t, got)
 			recordPath := strings.TrimSuffix(path, ".json") + ".blocks.json"

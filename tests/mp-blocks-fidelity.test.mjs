@@ -41,8 +41,8 @@ function fbifV2Module() {
   return {
     schema_version: 2, enabled: true, active_preset_id: 'original',
     presets: [
-      { id: 'original', name: '原创', order, blocks: shared(textB('* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* FBIF投稿与商务合作，联系Bobo（ID：fbifmedia1）', false, 15, '#888888', 'left')) },
-      { id: 'repost', name: '转载', order, blocks: shared(textB('* 本文为转载文章。\n* FBIF投稿与商务合作，联系Bobo（ID：fbifmedia1）', false, 15, '#888888', 'left')) },
+      { id: 'original', name: '原创', order, blocks: shared(textB('* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* 投稿与商务合作请在后台回复“商务合作”。', false, 15, '#888888', 'left')) },
+      { id: 'repost', name: '转载', order, blocks: shared(textB('* 本文为转载文章。\n* 投稿与商务合作请在后台回复“商务合作”。', false, 15, '#888888', 'left')) },
     ],
   };
 }
@@ -52,7 +52,7 @@ test('v2 FBIF 原创预设：顺序/三条文案/图宽661/粗体/间距复刻�
   // 粗体标题 17 深褐
   assert.match(out, /提示：/); assert.match(out, /font-size:17px/); assert.match(out, /font-weight:bold/); assert.match(out, /color:rgb\(84, 69, 69\)/);
   // 原创三条（含「转载请在后台回复」）
-  assert.match(out, /本文为FBIF原创/); assert.match(out, /转载请在后台回复/); assert.match(out, /FBIF投稿与商务合作/);
+  assert.match(out, /本文为FBIF原创/); assert.match(out, /转载请在后台回复/); assert.match(out, /投稿与商务合作请在后台回复“商务合作”。/); assert.doesNotMatch(out, /fbifmedia|Bobo（/);
   assert.match(out, /color:rgb\(136, 136, 136\)/); assert.match(out, /font-size:15px/);
   // 间距 + 图宽 661（非 100%）
   assert.match(out, /height:8px/); assert.match(out, /height:16px/);

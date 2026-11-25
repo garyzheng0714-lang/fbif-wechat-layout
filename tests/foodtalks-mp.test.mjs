@@ -41,7 +41,7 @@ test('网站开头署名挪到文末：来源、作者逐行深蓝斜体，再�
     '作者：叶宇',
     '提示：',
     '*本文为懂经原创，作者：叶宇，转载请联系出处。原文标题：《金粒门上海首店太火爆暂停营业，新鲜零食想在上海走长远，没那么简单》',
-    '*FoodTalks资讯投稿与商务合作，请联系Bobo。',
+    '*投稿与商务合作请在后台回复“商务合作”。',
   ]);
   const html = out.lines.join('\n');
   assert.match(html, /<section style="margin: 0 8px 0px;[^"]*"><span style="font-size: 15px; line-height: 1\.75; color: #02396b;[^"]*font-style: italic;">来源：懂经<\/span>/, '来源紧贴作者、深蓝斜体');
@@ -65,7 +65,7 @@ test('来源带网站声明里的公众号 ID；网站声明没写原文标题�
     '作者：RT内容组',
     '提示：',
     '*本文为零售圈原创，作者：RT内容组，转载请联系出处。',
-    '*FoodTalks资讯投稿与商务合作，请联系Bobo。',
+    '*投稿与商务合作请在后台回复“商务合作”。',
   ]);
 });
 
@@ -104,7 +104,7 @@ test('FoodTalks 原创：不写来源行，提示写「转载请底部留言」'
     ],
   }, { config });
   assert.deepEqual(readerLines(out.lines).slice(-4), [
-    '作者：Doris', '提示：', '*本文为FoodTalks原创，转载请底部留言。', '*FoodTalks资讯投稿与商务合作，请联系Bobo。',
+    '作者：Doris', '提示：', '*本文为FoodTalks原创，转载请底部留言。', '*投稿与商务合作请在后台回复“商务合作”。',
   ]);
 });
 

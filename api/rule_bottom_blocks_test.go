@@ -2,7 +2,6 @@ package main
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -118,10 +117,9 @@ func TestDefaultMpBottomBlocksModuleV2Shape(t *testing.T) {
 	}
 	blocks := original["blocks"].(map[string]any)
 	tipBody := blocks["tip_body"].(map[string]any)["fields"].(map[string]any)["content"].(string)
-	for _, frag := range []string{"本文为FBIF原创", "转载请在后台回复", "FBIF投稿与商务合作"} {
-		if !strings.Contains(tipBody, frag) {
-			t.Errorf("original tip_body 缺文案 %q（codex #2）", frag)
-		}
+	// 2026-11-25 Bobo 定的原创底部原文（不放微信号，怕被限流）。
+	if want := "* 本文为FBIF原创，欢迎转发朋友圈；\n* 转载请在后台回复“转载”了解规则；\n* 投稿与商务合作请在后台回复“商务合作”。"; tipBody != want {
+		t.Errorf("original tip_body 文案不对:\n got=%q\nwant=%q", tipBody, want)
 	}
 	byline := blocks["byline"].(map[string]any)["fields"].(map[string]any)
 	if byline["width"] != 661 {
@@ -134,11 +132,9 @@ func TestDefaultMpBottomBlocksModuleV2Shape(t *testing.T) {
 	}
 	// 转载预设两条、不含原创
 	repostBody := presets[1].(map[string]any)["blocks"].(map[string]any)["tip_body"].(map[string]any)["fields"].(map[string]any)["content"].(string)
-	if strings.Contains(repostBody, "本文为FBIF原创") {
-		t.Error("repost tip_body 不应含原创文案")
-	}
-	if !strings.Contains(repostBody, "本文为转载") {
-		t.Error("repost tip_body 应含转载文案")
+	// 2026-11-25 Bobo 定的转载底部原文。
+	if want := "* 本文为转载文章。\n* 投稿与商务合作请在后台回复“商务合作”。"; repostBody != want {
+		t.Errorf("repost tip_body 文案不对:\n got=%q\nwant=%q", repostBody, want)
 	}
 }
 

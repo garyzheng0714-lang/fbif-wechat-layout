@@ -101,7 +101,7 @@ export const SITE_ARTICLE_TEMPLATES = Object.freeze({
   source_credit: '来源：{source}{source_id}',
   repost_tip: '*本文为{source}原创{author}，转载请联系出处。{original_title}',
   original_tip: '*本文为FoodTalks原创，转载请底部留言。',
-  contact_tip: '*FoodTalks资讯投稿与商务合作，请联系Bobo。',
+  contact_tip: '*投稿与商务合作请在后台回复“商务合作”。',
 });
 
 // 图注关键词（紧跟图片、或含来源前缀的短段 → 12px 灰居中图注）。

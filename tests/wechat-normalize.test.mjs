@@ -29,7 +29,7 @@ test('footer source is already a normalized component, not pasted editor html', 
   assert.match(footer, /<section style="text-align: center;" data-card-inset="8">/);
   assert.doesNotMatch(footer, /<section style="text-align: center;margin-left: 8px;margin-right: 8px;">/);
 
-  for (const text of ['* 本文为', '* 转载请', '* FBIF投稿']) {
+  for (const text of ['* 本文为', '* 转载请', '* 投稿与商务合作']) {
     const idx = footer.indexOf(text);
     assert.ok(idx >= 0, `footer should contain ${text}`);
     const segment = footer.slice(Math.max(0, idx - 500), idx + 120);

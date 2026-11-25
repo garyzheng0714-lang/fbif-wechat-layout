@@ -16,6 +16,7 @@ var publishWechatTrailerLeakPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`/\s*更多文章\s*/`),
 	regexp.MustCompile(`/\s*1000\s*个食品创新案例\s*/`),
 	regexp.MustCompile(`后台回复.{0,8}转载`),
+	regexp.MustCompile(`后台回复.{0,8}商务合作`),
 	regexp.MustCompile(`(?i)fbifmedia`),
 }
 

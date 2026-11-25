@@ -174,6 +174,7 @@ func TestPublishHTMLWechatTrailerLeakRejectsWechatChrome(t *testing.T) {
 		`<p>/ 更多文章 /</p>`,
 		`* 转载请在后台回复“转载”了解规则；`,
 		`联系Bobo（微信：fbifmedia1）`,
+		`* 投稿与商务合作请在后台回复“商务合作”。`,
 	}
 	for _, html := range cases {
 		if publishHTMLWechatTrailerLeak(html) == "" {

@@ -53,7 +53,7 @@ func defaultFoodTalksMpRuleBehavior() map[string]any {
 	templates["source_credit"] = "来源：{source}{source_id}"
 	templates["repost_tip"] = "*本文为{source}原创{author}，转载请联系出处。{original_title}"
 	templates["original_tip"] = "*本文为FoodTalks原创，转载请底部留言。"
-	templates["contact_tip"] = "*FoodTalks资讯投稿与商务合作，请联系Bobo。"
+	templates["contact_tip"] = "*投稿与商务合作请在后台回复“商务合作”。"
 	return beh
 }
 

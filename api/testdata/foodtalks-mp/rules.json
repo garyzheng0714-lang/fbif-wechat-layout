@@ -105,7 +105,7 @@
   },
   "templates": {
    "biz_coop_replacement": "如有合作意向，请移至“{contact_section}”获取联系方式",
-   "contact_tip": "*FoodTalks资讯投稿与商务合作，请联系Bobo。",
+   "contact_tip": "*投稿与商务合作请在后台回复“商务合作”。",
    "original_tip": "*本文为FoodTalks原创，转载请底部留言。",
    "recommended_reading_note": "查看更多推荐阅读，请拉至文末点击“阅读原文”访问FoodTalks网站",
    "ref_header_label": "参考来源：",
