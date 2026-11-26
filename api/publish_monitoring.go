@@ -246,9 +246,13 @@ func updatePublishMonitoringFailures(status *publishMonitoringStatus, job publis
 	jobFailed := job.Stage == publishStageFailed
 	// 第三方平台的失败按 lane 失败那一刻算近期：补查、刷卡都会刷新 job.UpdatedAt，
 	// 用它算就会把几周前的失败当新失败一直告警（2026-10-14 #153/#260/#183）。
+	// 草稿存好却读回对不上、没发的（draft_saved）也是这篇没发出去：系统按退避另存重推，3 次都没对上多半是写法错了、
+	// 重推也一样，和失败一样告警（2026-11-26 #400 头条号、知乎号对不上卡了 2 天，#369 知乎号卡了 12 天，都只记了一条不提醒的警告，
+	// 是人在群里问了才发现）。
 	externalFailed, externalFailedAt := false, time.Time{}
 	for _, lane := range job.ExternalDistributionLanes {
-		if lane.State != publishExternalDistributionFailed && lane.State != publishExternalDistributionRejected {
+		held := lane.State == publishExternalDistributionDraftSaved && externalLaneAutoRetryState(lane)
+		if lane.State != publishExternalDistributionFailed && lane.State != publishExternalDistributionRejected && !held {
 			continue
 		}
 		outlook := externalLaneOutlookOf(job, lane, now)
@@ -359,7 +363,7 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.DuplicateSourceKeys > 0, fmt.Sprintf("duplicate_source_keys:%d", status.DuplicateSourceKeys), publishMonitoringIssue | publishMonitoringAlert,
 			publishMonitoringHint{"同一篇原文进了两个任务", "在管理后台找出重复的任务，只留一个"}},
 		{status.FailedRecent > 0, fmt.Sprintf("failed_jobs_recent:%d", status.FailedRecent), publishMonitoringIssue | publishMonitoringAlert,
-			publishMonitoringHint{fmt.Sprintf("最近 24 小时有 %d 篇没做成（排版、发布、重抓原文，或同步第三方平台自己重推 3 次都没成）", status.FailedRecent),
+			publishMonitoringHint{fmt.Sprintf("最近 24 小时有 %d 篇没做成（排版、发布、重抓原文，或同步第三方平台自己重推 3 次都没成、草稿读回 3 次都对不上）", status.FailedRecent),
 				"在管理后台看失败原因；第三方平台的看审核卡上那一行"}},
 		{status.failedUnresolved > 0, fmt.Sprintf("failed_jobs_unresolved:%d", status.failedUnresolved), publishMonitoringIssue | publishMonitoringAlert,
 			publishMonitoringHint{"有文章发布失败、还没处理", "在管理后台看原因并重试"}},

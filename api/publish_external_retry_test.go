@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,47 @@ func TestExternalAutoRetryResavesHeldDraft(t *testing.T) {
 	}
 	if kept := robot.records[held.IntentKey]; kept.ArticleID != testRobotArticleID || kept.Action != nil {
 		t.Fatalf("旧草稿不动：%+v", kept)
+	}
+}
+
+// TestExternalAutoRetryHeldDraftAlertsAfterThreeMismatches 草稿每回读回都对不上（2026-11-26 #400 加粗被平台并掉、#369 图注引号）：
+// 前 3 次重推照常不告警，3 次都对不上就和失败一样告警，不能只记一条不提醒的警告、等人在群里问。
+func TestExternalAutoRetryHeldDraftAlertsAfterThreeMismatches(t *testing.T) {
+	setTestRobotOnlyConfig(t)
+	t.Setenv("FEISHU_REVIEWER_OPEN_IDS", "ou_reviewer_1")
+	env := newPublishTestEnv(t)
+	clock := useRetryClock(t, env, "2026-11-24 09:02")
+	robot := useFakeRobot(env)
+	mismatched := testRobotSavedRecord(testRobotArticleID)
+	match := false
+	mismatched.Match, mismatched.Mismatches = &match, []string{"加粗送去 23 处，平台上 22 处"}
+	robot.saveRecord = &mismatched
+	job := createPublishedDistributionJob(t, env, "FBIF食品饮料创新")
+	if _, err := env.pipeline.requestExternalDistribution(job.ID, "ou_reviewer_1", publishExternalDistributionCardVersion(job)); err != nil {
+		t.Fatal(err)
+	}
+	target := testArticleAccount(testBaijiaAccountID, "baijiahao", false)
+	for retries := 0; retries <= 3; retries++ {
+		lane := mustLane(t, mustJob(t, env, job.ID), testBaijiaAccountID)
+		if lane.State != publishExternalDistributionDraftSaved || lane.AutoRetries != retries {
+			t.Fatalf("第 %d 次重推后还停在草稿：%+v", retries, lane)
+		}
+		status := currentPublishMonitoring(env.store, false, clock.now)
+		if alert := slices.ContainsFunc(status.AlertIssues, func(a string) bool { return strings.HasPrefix(a, "failed_jobs_recent:") }); alert != (retries >= 3) {
+			t.Fatalf("重推 %d 次后：前 3 次不告警、3 次都对不上才告警：%+v", retries, status)
+		}
+		if retries == 3 {
+			break
+		}
+		at, ok := externalLaneNextAutoRetry(lane, target, clock.now)
+		if !ok {
+			t.Fatalf("第 %d 次后还该自己重推", retries)
+		}
+		clock.now = at
+		env.pipeline.retryExternalLanes()
+	}
+	if len(robot.publishes) != 0 {
+		t.Fatalf("对不上的草稿一篇都不发：%v", robot.publishes)
 	}
 }
 
