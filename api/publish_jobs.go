@@ -318,17 +318,29 @@ func (s *publishJobStore) readLocked() (publishJobDocument, error) {
 
 // writeLocked 临时文件 + rename 原子替换（同 rulePresetStore 模式），崩溃不会留半截文件。
 func (s *publishJobStore) writeLocked(doc publishJobDocument) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0755); err != nil {
+	if err := writeDurableJSON(s.path, ".publish-jobs-*.json", doc); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".publish-jobs-*.json")
+	if s.written != nil {
+		s.written()
+	}
+	return nil
+}
+
+// writeDurableJSON 把 v 缩进写成 JSON：临时文件 + rename 原子替换，再同步目录。rename 原子但不等于掉电持久，
+// 目录也同步了，「先落 intent、再外调」的顺序才成立。发布任务库和快讯任务库共用。
+func writeDurableJSON(path, tmpPattern string, v any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), tmpPattern)
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
 	enc := json.NewEncoder(tmp)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(doc); err != nil {
+	if err := enc.Encode(v); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
 		return err
@@ -342,23 +354,16 @@ func (s *publishJobStore) writeLocked(doc publishJobDocument) error {
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, s.path); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
-	// rename 原子但不等于掉电持久；同步目录，确保「先落 intent、再外调」的顺序成立。
-	dir, err := os.Open(filepath.Dir(s.path))
+	dir, err := os.Open(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return err
-	}
-	if s.written != nil {
-		s.written()
-	}
-	return nil
+	return dir.Sync()
 }
 
 // create 建单 + source_key 永久幂等收敛：同 key 只允许存在一条任务，包含 published /

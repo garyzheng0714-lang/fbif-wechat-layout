@@ -49,7 +49,7 @@
 
 三者代码库/数据库/服务器独立，**只经 HTTP API 通信，不共享存储**；同稿由 `source_key` 幂等只建一单。
 
-1. 两个机器入口只收链接（红线 33），五个正文旁路字段必须 400。
+1. 两个机器入口只收链接（红线 33），五个正文旁路字段必须 400；快讯入口只收资讯编号（红线 53）。
 2. 不改两个监控端代码；发现问题只报告给其负责人。
 3. 健康探针、告警、失败计数归监控端；本项目仅提供 `GET /api/publish/monitoring`，不主动探外部服务（红线 30）。
 4. 任务状态推给资讯订阅：提交时带 `status_callback_url`（只许与 `FOODTALKS_FEED_BASE_URL` 同源）的任务，`sync-status` 摘要每变一次签名 POST 过去（Standard Webhooks，密钥用 `PUBLISH_SYNC_SERVICE_TOKEN`）；约定只在 [docs/publish-status-callback.md](docs/publish-status-callback.md)。细则 §三系统边界 4
@@ -95,7 +95,7 @@
 30. **P0 监控**：任意改动须通过无 paths 过滤的 `.github/workflows/p0-monitoring-contract.yml`，禁删测/skip/降级；`GET /api/publish/monitoring` 如实报各类缺口；外检 watchdog 已迁 `FoodTalks_Feed`，本仓库禁重建。细则 §30
 31. **飞书文档异步导入**：交互导入只走 export jobs + long-poll，服务端一次镜像图片；禁退回同步入口、禁删相关文件；合并冲突逐文件裁决，禁整树取一侧。细则 §31
 32. **粘贴即排版（2026-08-06 用户裁定）**：粘贴后按输入框最终全文立即提交，URL/飞书链接/正文/Markdown 同等；粘贴的文字按 Markdown 认行首记号与行内链接、加粗（AI 答复点复制按钮得到的就是 Markdown；标题、引用记号去掉，无序列表换成「•」，网址不转全角），选中复制网页时浏览器纯文字里没有的列表圆点、序号从 text/html 的 `<li>` 补回框里，两种复制排出来一样（2026-10-29 用户：「感觉就很奇怪」）；追加粘贴整稿重排；仅 `@` 搜索不自动。禁恢复 `#importSubmitBtn/.import-submit-button`；动作行只留“粘贴后自动排版”；手输以 Cmd/Ctrl+Enter 提交。
-33. **机器发布只收链接**：`site-sync/official-sync` 只收 `url`，五个正文旁路字段一律 400，禁恢复任何 HTTP 正文旁路；鉴权头 `X-Publish-Sync-Token`（`PUBLISH_SYNC_SERVICE_TOKEN`）；例外只有 `/api/html-to-blocks`、`/api/layout/v1/*`（46）、`/mcp`（51），都只转换或排版、不建任务。细则 §33
+33. **机器发布只收链接**：`site-sync/official-sync` 只收 `url`，五个正文旁路字段一律 400，禁恢复任何 HTTP 正文旁路；鉴权头 `X-Publish-Sync-Token`（`PUBLISH_SYNC_SERVICE_TOKEN`）；例外只有 `/api/html-to-blocks`、`/api/layout/v1/*`（46）、`/mcp`（51），都只转换或排版、不建任务；快讯入口 `flash-sync` 只收资讯编号，事实回资讯订阅取（53）。细则 §33
 34. **审核卡可识别文章**：各状态都有 hero（封面、标题、标签、摘要、链接），回调同步返回新卡、禁现场传图；样式变了用 `card-refresh` 原位更新；一张卡最多 200 个元素，超了先去图标、再把分发区收成一行字，加平台前先跑卡片上限测试；过飞书 14 天期限记 `expired`、不重试。细则 §34
 35. **风险分层**：首屏最多 3 条 `confirmed` 实质项，其余折叠（已证实≤10、待核≤6）；正文全文送模型；口径只在 `publishRiskItemConfirmed/splitPublishRiskItems`，模型回答只按 `decodePublishRiskOutput` 解析。细则 §35
 36. **审核群只发卡片（2026-08-09 用户裁定）**：禁运维播报；`cleanup_group_broadcast` 只清理且回滚不恢复。监控仍由外部读取 `GET /api/publish/monitoring`。例外（2026-10-12 用户裁定：「在卡片里@人可能收不到……在这个卡片消息的话题下创建一个对话，@对应的人」）：外发待修改提醒以富文本回复进审核卡的话题，每轮只发开头 @ 一条与改好收尾一条；校对提醒（红线 44）同样只回复进卡片话题，同一组错误只发一条。
@@ -115,6 +115,7 @@
 50. **公众号滑动图**：只有公众号排成滑动图（共用 `templates/shared/image-swipe.js`），FoodTalks、外发、排版接口照旧竖排并去掉滑动提示；提示语认法 Go、网页各一份，都用 `api/testdata/swipe-hints.json` 考。细则 §50
 51. **智能体入口**：`/mcp` 只排版和校对、给编辑器链接；禁存草稿、发布、碰 FoodTalks 或第三方平台，禁另写排版或校对，日志和回包不出令牌；本项目自己当授权服务器，只放飞书登录的同事；提示词只写一份。细则 §51
 52. **FoodTalks 官网首页轮播图**（2026-11-28 用户拍板）：FBIF食品饮料创新当天的头条（这篇自己的公众号链接里 `idx=1`，不看 `original_source_url`）发到 FoodTalks 的那一刻建一张首页轮播图（封面、标题、`/news/<编号>`），首页上最旧的下架、保持 6 张；当天没上不换、之前的不补，同一篇只建一次、建前先按链接找；只在发布那一刻、开机、退避到点时跑，不轮询。细则 §52
+53. **FoodTalks 快讯**（2026-11-29 用户交代，正式打开等用户点头）：资讯订阅经 `POST /api/publish/flash-sync` 只交资讯编号，事实回资讯订阅取；每次写稿前读飞书《FoodTalks网站快讯 AI编辑规范》最新版（中台 `FLASH_SPEC_DOC`），规范正文不进代码、不另写一份；MiMo Pro 写稿、对原文、风险检查（同 `aiAssessRiskText`）后发审核卡，人点通过才发 FoodTalks 快讯，建前按标题找、同一篇只建一次；不进第三方平台；状态以 `publish.flash.status` 推到资讯订阅的 `/api/internal/flash-status`，不推 `layout-status`。细则 §53
 
 ## 守护索引
 每条红线由哪些测试守着，见细则 §守护索引；改哪条红线的行为，先跑那几条。

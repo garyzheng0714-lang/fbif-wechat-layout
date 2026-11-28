@@ -71,10 +71,13 @@ func (p *publishPipeline) startPublishMonitorWake() {
 		return
 	}
 	w := newPublishMonitorWake(foodTalksFeedBaseURL()+publishMonitorWakePath, func(now time.Time) publishMonitoringStatus {
-		return currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), now)
+		return currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), p.flash.flashMonitoringFailures(), now)
 	})
 	w.begin(context.Background())
 	p.store.onWrite(w.notify)
+	if p.flash != nil {
+		p.flash.store.written = w.notify
+	}
 	p.foodTalksAuth.onFlip(w.notify)
 	log.Printf("monitor-wake: 要找人的告警多一类或少一类就 POST %s", w.url)
 }

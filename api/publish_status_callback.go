@@ -135,13 +135,16 @@ func publishStatusFingerprint(summary publishSyncJobSummary) string {
 // stampPublishStatusCallback 由 updateIf 在写盘前调用：登记过回调、摘要变了，就排上新的一版。
 // 返回 true 表示写完要叫醒发送器。
 func stampPublishStatusCallback(job *publishJob) bool {
-	cb := &job.StatusCallback
-	if cb.URL == "" {
+	if job.StatusCallback.URL == "" {
 		return false
 	}
 	summary := newPublishSyncJobSummary(*job)
-	fp := publishStatusFingerprint(summary)
-	if fp == cb.Fingerprint {
+	return stampStatusCallback(&job.StatusCallback, summary, publishStatusFingerprint(summary), job.UpdatedAt)
+}
+
+// stampStatusCallback 文章、快讯共用：摘要指纹 fp（不算更新时间）变了就把 summary 记成新的一版。返回 true 表示写完要叫醒发送器。
+func stampStatusCallback(cb *publishStatusCallback, summary any, fp, queuedAt string) bool {
+	if cb.URL == "" || fp == cb.Fingerprint {
 		return false
 	}
 	snapshot, err := json.Marshal(summary)
@@ -151,7 +154,7 @@ func stampPublishStatusCallback(job *publishJob) bool {
 	cb.Seq++
 	cb.Fingerprint = fp
 	cb.Snapshot = snapshot
-	cb.QueuedAt = job.UpdatedAt
+	cb.QueuedAt = queuedAt
 	if cb.State == publishStatusCallbackDeadLetter { // 新的一版重新开始推
 		cb.State, cb.StateAt, cb.Error = "", "", ""
 	}
@@ -159,7 +162,8 @@ func stampPublishStatusCallback(job *publishJob) bool {
 }
 
 // publishStatusCallbackBody 推送的请求体。同一版每次重试一字不差（签名里的时间戳另算）。
-func publishStatusCallbackBody(jobID, seq int64, queuedAt string, snapshot json.RawMessage) ([]byte, error) {
+// eventType 是文章任务的 publish.job.status 或快讯任务的 publish.flash.status（flash_jobs.go）。
+func publishStatusCallbackBody(eventType string, jobID, seq int64, queuedAt string, snapshot json.RawMessage) ([]byte, error) {
 	type data struct {
 		JobID int64           `json:"job_id"`
 		Seq   int64           `json:"seq"`
@@ -169,11 +173,12 @@ func publishStatusCallbackBody(jobID, seq int64, queuedAt string, snapshot json.
 		Type      string `json:"type"`
 		Timestamp string `json:"timestamp"`
 		Data      data   `json:"data"`
-	}{publishStatusCallbackEventType, queuedAt, data{jobID, seq, snapshot}})
+	}{eventType, queuedAt, data{jobID, seq, snapshot}})
 }
 
-func publishStatusCallbackMessageID(jobID, seq int64) string {
-	return fmt.Sprintf("layout-job-%d-%d", jobID, seq)
+// publishStatusCallbackMessageID webhook-id：文章 layout-job-<编号>-<版>，快讯 layout-flash-<编号>-<版>。
+func publishStatusCallbackMessageID(prefix string, jobID, seq int64) string {
+	return fmt.Sprintf("%s-%d-%d", prefix, jobID, seq)
 }
 
 // signPublishStatusCallback Standard Webhooks 的对称签名：v1,base64(HMAC-SHA256(密钥, "id.时间戳.请求体"))。
@@ -205,12 +210,28 @@ const (
 	publishStatusCallbackRefused // 410
 )
 
+// statusCallbackLedger 推送记在哪本账上：文章任务库或快讯任务库。送达、放弃、410 都改那条任务上的推送记录，
+// cond 不成立（地址换了、又变了一版）就不动。
+type statusCallbackLedger interface {
+	updateStatusCallback(id int64, cond func(publishStatusCallback) bool, mutate func(*publishStatusCallback)) error
+}
+
+// updateStatusCallback 文章任务库的推送记账。
+func (s *publishJobStore) updateStatusCallback(id int64, cond func(publishStatusCallback) bool, mutate func(*publishStatusCallback)) error {
+	_, _, err := s.updateIf(id, func(current publishJob) bool { return cond(current.StatusCallback) },
+		func(j *publishJob) { mutate(&j.StatusCallback) })
+	return err
+}
+
 // publishStatusCallbacks 每个任务只留最新一版待推；一个 goroutine 串行发，失败按退避排下一次。
+// 文章任务和快讯任务各一个发送器，差别只在记账的库、事件类型和 webhook-id 前缀。
 type publishStatusCallbacks struct {
-	store  *publishJobStore
-	client *http.Client
-	now    func() time.Time
-	jitter func(time.Duration) time.Duration
+	ledger    statusCallbackLedger
+	eventType string
+	idPrefix  string
+	client    *http.Client
+	now       func() time.Time
+	jitter    func(time.Duration) time.Duration
 
 	mu    sync.Mutex
 	due   map[int64]*publishStatusCallbackEntry
@@ -218,11 +239,21 @@ type publishStatusCallbacks struct {
 	start sync.Once
 }
 
-// newPublishStatusCallbacks 建发送器并挂到任务库上（任务库写盘后叫醒它）。
+// newPublishStatusCallbacks 建文章任务的发送器并挂到任务库上（任务库写盘后叫醒它）。
 func newPublishStatusCallbacks(store *publishJobStore) *publishStatusCallbacks {
+	c := newStatusCallbackSender(publishStatusCallbackEventType, "layout-job")
+	if store != nil {
+		c.ledger = store
+		store.statusCallbacks = c
+	}
+	return c
+}
+
+func newStatusCallbackSender(eventType, idPrefix string) *publishStatusCallbacks {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	c := &publishStatusCallbacks{
-		store: store,
+	return &publishStatusCallbacks{
+		eventType: eventType,
+		idPrefix:  idPrefix,
 		client: &http.Client{
 			Timeout:   publishStatusCallbackTimeout,
 			Transport: transport,
@@ -234,22 +265,22 @@ func newPublishStatusCallbacks(store *publishJobStore) *publishStatusCallbacks {
 		due:    map[int64]*publishStatusCallbackEntry{},
 		wake:   make(chan struct{}, 1),
 	}
-	if store != nil {
-		store.statusCallbacks = c
-	}
-	return c
 }
 
 // queued 任务库写盘后（或启动恢复时）交来任务：有没送达的一版就排上。
 func (c *publishStatusCallbacks) queued(job publishJob) {
-	cb := job.StatusCallback
+	c.enqueue(job.ID, job.StatusCallback)
+}
+
+// enqueue 某条任务的推送记录有没送达的一版就排上（文章、快讯共用）。
+func (c *publishStatusCallbacks) enqueue(id int64, cb publishStatusCallback) {
 	if c == nil || cb.URL == "" || cb.Seq <= cb.DeliveredSeq || cb.State != "" || len(cb.Snapshot) == 0 {
 		return
 	}
 	c.mu.Lock()
-	if cur := c.due[job.ID]; cur == nil || cur.seq < cb.Seq || cur.url != cb.URL {
-		c.due[job.ID] = &publishStatusCallbackEntry{
-			jobID: job.ID, url: cb.URL, seq: cb.Seq, queuedAt: cb.QueuedAt,
+	if cur := c.due[id]; cur == nil || cur.seq < cb.Seq || cur.url != cb.URL {
+		c.due[id] = &publishStatusCallbackEntry{
+			jobID: id, url: cb.URL, seq: cb.Seq, queuedAt: cb.QueuedAt,
 			snapshot: append(json.RawMessage(nil), cb.Snapshot...), nextAt: c.now(),
 		}
 	}
@@ -330,11 +361,11 @@ func (c *publishStatusCallbacks) deliver(ctx context.Context, e publishStatusCal
 	if secret == "" {
 		return publishStatusCallbackFailed, 0, "PUBLISH_SYNC_SERVICE_TOKEN 未配置，没法签名"
 	}
-	body, err := publishStatusCallbackBody(e.jobID, e.seq, e.queuedAt, e.snapshot)
+	body, err := publishStatusCallbackBody(c.eventType, e.jobID, e.seq, e.queuedAt, e.snapshot)
 	if err != nil {
 		return publishStatusCallbackFailed, 0, "请求体生成失败：" + err.Error()
 	}
-	msgID := publishStatusCallbackMessageID(e.jobID, e.seq)
+	msgID := publishStatusCallbackMessageID(c.idPrefix, e.jobID, e.seq)
 	timestamp := c.now().Unix()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.url, bytes.NewReader(body))
 	if err != nil {
@@ -387,11 +418,11 @@ func (c *publishStatusCallbacks) settle(sent publishStatusCallbackEntry, result 
 	switch result {
 	case publishStatusCallbackDelivered:
 		c.forget(sent, false)
-		if _, _, err := c.store.updateIf(sent.jobID, func(current publishJob) bool {
-			return current.StatusCallback.URL == sent.url && current.StatusCallback.DeliveredSeq < sent.seq
-		}, func(j *publishJob) {
-			j.StatusCallback.DeliveredSeq = sent.seq
-			j.StatusCallback.DeliveredAt = stamp
+		if err := c.ledger.updateStatusCallback(sent.jobID, func(cb publishStatusCallback) bool {
+			return cb.URL == sent.url && cb.DeliveredSeq < sent.seq
+		}, func(cb *publishStatusCallback) {
+			cb.DeliveredSeq = sent.seq
+			cb.DeliveredAt = stamp
 		}); err != nil {
 			log.Printf("publish: 任务 #%d 状态推送已送达，记账失败（重启后会再推一次）：%v", sent.jobID, err)
 		}
@@ -438,13 +469,12 @@ func (c *publishStatusCallbacks) forget(sent publishStatusCallbackEntry, anySeq 
 }
 
 func (c *publishStatusCallbacks) persistStop(sent publishStatusCallbackEntry, state, stamp, errText string, sameSeq bool) {
-	if _, _, err := c.store.updateIf(sent.jobID, func(current publishJob) bool {
-		cb := current.StatusCallback
+	if err := c.ledger.updateStatusCallback(sent.jobID, func(cb publishStatusCallback) bool {
 		return cb.URL == sent.url && (!sameSeq || cb.Seq == sent.seq)
-	}, func(j *publishJob) {
-		j.StatusCallback.State = state
-		j.StatusCallback.StateAt = stamp
-		j.StatusCallback.Error = truncateRunes(errText, 500)
+	}, func(cb *publishStatusCallback) {
+		cb.State = state
+		cb.StateAt = stamp
+		cb.Error = truncateRunes(errText, 500)
 	}); err != nil {
 		log.Printf("publish: 任务 #%d 记状态推送 %s 失败：%v", sent.jobID, state, err)
 	}

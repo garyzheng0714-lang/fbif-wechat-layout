@@ -300,14 +300,16 @@ func TestFeishuCallbackSLAReturnsToastWhenStoreBusy(t *testing.T) {
 		t.Fatalf("3 秒响应不得带整张卡，实际 %s", rec.Body.String())
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
+	// 等后台把审核整个做完（公开、发完通知并记账）再结束：只等到 publicizing 就返回的话，
+	// 后台还在往临时目录写任务库，和测试收尾删目录撞上，约一成概率报 directory not empty（2026-11-29 压测 100 遍错 8–11 遍）。
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		got, err := env.store.byID(job.ID)
-		if err == nil && (got.Stage == publishStagePublicizing || got.Stage == publishStagePublished) {
+		if err == nil && got.Stage == publishStagePublished && got.NotificationKind == "" && got.NotificationSentAt != "" {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("锁释放后审核应继续，实际 stage=%q err=%v", got.Stage, err)
+			t.Fatalf("锁释放后审核应做完并发出通知，实际 stage=%q notification=%q/%q err=%v", got.Stage, got.NotificationKind, got.NotificationState, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

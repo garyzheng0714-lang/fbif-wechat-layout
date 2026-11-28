@@ -1,7 +1,7 @@
 # 发布接入契约（上游监控端 → 排版服务）
 
 > 读者：**本仓库之外的调用方**——`FoodTalks_Feed`（实时线）与 `fbif-wechat-article`（T+1 归档线）的开发者或维护它们的 agent。
-> 本仓库自己的端点全量清单在 [README 的 API 段](../README.md#api)；这一份只讲「别人怎么把文章交给排版服务」。
+> 本仓库自己的端点全量清单在 [README 的 API 段](../README.md#api)；这一份只讲「别人怎么把文章交给排版服务」。快讯怎么交见 §10。
 > 契约以当前 `api/publish_http.go`、`api/publish_service_auth.go` 与 `api/publish_pipeline.go` 为准；本页字段与状态码逐条核对至 2026-08-06。
 
 ## 0. 先理解边界：你交链接，我抓正文
@@ -131,3 +131,71 @@ X-Publish-Sync-Token: <本服务的 PUBLISH_SYNC_SERVICE_TOKEN>
 
 - **不要改本仓库的代码。** 看出问题就说出来，由本仓库改；反过来本仓库也不改你的。
 - **健康探测归监控端。** 本仓库只提供被探端点 `GET /api/publish/monitoring`，不主动探别人的死活。外检看门狗 `fbif-link-watchdog` 住在 `FoodTalks_Feed`。
+
+## 10. 快讯：只收资讯编号（2026-11-29 起）
+
+资讯订阅挑出值得写快讯的资讯，把它在资讯订阅里的编号交过来；排版服务回资讯订阅取事实，照飞书上的《FoodTalks网站快讯 AI编辑规范》最新版写稿、对原文、查风险，发审核卡，人点通过后发到 FoodTalks 快讯。设计和试跑见 [FoodTalks 快讯](foodtalks-flash.md)。
+
+**还没正式打开**：中台 `FLASH_ENABLED` 没开时入口一律 **503**（`快讯这条线还没开`）。资讯订阅 2026-11-29 起已在交，收到 503 隔一小时再问；开关开了，下一次问就交得进来。
+
+### 10.1 请求
+
+```
+POST /api/publish/flash-sync
+X-Publish-Sync-Token: <PUBLISH_SYNC_SERVICE_TOKEN，同 §2>
+Content-Type: application/json
+```
+
+```json
+{
+  "article_id": "0e6a6bf3-…",
+  "url": "https://www.example.com/news/123",
+  "status_callback_url": "https://feed.foodtalks.cn/api/internal/flash-status"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `article_id` | 是 | 资讯订阅里这篇资讯的编号，最长 128 字节。排版服务拿它调你的 `POST /api/internal/flash-source` 取事实 |
+| `url` | 否 | 原文链接，只用来排查、显示，**不拿它抓正文**；最长 2000 字 |
+| `status_callback_url` | 否 | 状态推送地址，规则同 [任务状态推送约定](publish-status-callback.md) §1。**快讯要填 `https://feed.foodtalks.cn/api/internal/flash-status`**：`/api/internal/layout-status` 只认文章任务的事件，快讯的推过去会 400 |
+
+**只认这三个字段**：带了别的（`title`、`text`、`source_name`……）整个请求 **400**，任务不建。道理同 §1：事实只从资讯订阅的取原文接口拿一份，免得两边对不上。请求体上限 16KB。
+
+### 10.2 响应
+
+```json
+{ "existing": false,
+  "job": { "id": 12, "article_id": "0e6a6bf3-…", "stage": "queued", "created_at": "…", "updated_at": "…" },
+  "status_callback_url": "https://feed.foodtalks.cn/api/internal/flash-status" }
+```
+
+| 码 | 什么时候 | 你该怎么办 |
+| --- | --- | --- |
+| `201` | 新建了一条快讯任务 | 记下 `job.id`。带了回调地址的，响应里会回显 `status_callback_url`，没看到就说明这边没认，照旧回查 |
+| `200` | 这篇已经交过（`existing: true`） | 正常幂等命中，`job` 是那一条现在的样子，不要重投 |
+| `400` | 多了字段、缺 `article_id`、回调地址不是资讯订阅的 | 读 `error` |
+| `401` | 没带口令或不对 | 同 §2 |
+| `503` | 快讯还没开（`FLASH_ENABLED`），或部署候选暂停写入 | 稍后再试 |
+
+`job` 的字段和状态推送里的 `data.job` 是同一个结构，见 [任务状态推送约定](publish-status-callback.md) §8。要看稿子全文、检查结果，用 `GET /api/publish/flash-jobs/{id}`（同一个口令）。
+
+### 10.3 同一篇重复交
+
+- **同一个 `article_id` 永远只有一条快讯任务**，不管它现在是待审、已发、驳回、不写还是失败。重复交回 **200 + `existing: true`** + 现在的状态，不会再写一遍，也不会再发一张卡。
+- 重复交时带上回调地址，会登记到那一条上并马上推一次当前状态；同一个地址重复登记不动，除非上次已放弃或你回过 410（规矩同文章任务）。版本号 `seq` 接着往上加，不会清零。
+- 被驳回、判了不写的，不会因为重交就重来；要重写找排版服务这边。管理员的 `POST /api/publish/flash-jobs/{id}/retry` 只对 `failed` 的有用，从失败那一步接着做。
+
+### 10.4 排版服务这边还会挡哪些
+
+| 情况 | 结果 |
+| --- | --- |
+| 你的判定里 `hard_filter` 不空，或 `flags` 有 `sponsored` | 不写，`stage=skipped`，`skip_reason` 写原因 |
+| 同一件事（你给的 `event.id` 一样）已经有一条没驳回、没失败的快讯任务 | 不写，`skip_reason` 指向前一条的编号 |
+| 模型对照 FoodTalks 前台看得到的最近 50 条资讯和 50 条快讯，认出网站已经发过同一件事 | 不写，`duplicate_of` 写是哪条 |
+| 发布前按标题在 FoodTalks 快讯里找到在架的同题一条 | 不发，`skip_reason=FoodTalks 快讯里已经有同题的一条`，`duplicate_of` 是那条的网址 |
+| `flags` 有 `verify` 或 `controversy` | 照写，审核卡上必有编辑核实提示 |
+| `flags` 有 `incomplete` | 交给模型判断，信息不够就不硬写（`skipped`） |
+
+取原文接口回 **404** 直接记 `failed`、不重试；401、503、超时这类按 1、5、15、30 分钟退避重试，从收下起 24 小时还不成记 `failed`。排版服务每篇调一次取原文接口，另外为找同一件事里最早的报道，最多再调一次。
+

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -187,7 +188,72 @@ func aiPostOnce(ctx context.Context, apiKey, url string, payload []byte, extract
 	if err != nil {
 		return "", fmt.Errorf("读 MiMo 响应失败: %w", err)
 	}
+	if rec, ok := ctx.Value(aiUsageKey{}).(*aiUsage); ok && resp.StatusCode == http.StatusOK {
+		rec.add(respBody)
+	}
 	return extract(respBody, resp.StatusCode)
+}
+
+// aiTokenUsage 几次 MiMo 调用一共用掉的 token（按响应里的 usage 记，算钱用）。
+type aiTokenUsage struct {
+	Calls             int `json:"calls"`
+	InputTokens       int `json:"input_tokens"`
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int `json:"output_tokens"`
+	ReasoningTokens   int `json:"reasoning_tokens,omitempty"` // 已算在 OutputTokens 里
+}
+
+// aiUsage 要记 token 的那件事用 withAIUsage 包一层 ctx，期间每次调用的 usage 都加进来；不包的调用照旧、不多解析一遍。
+// Responses 接口回 input_tokens/output_tokens，Chat Completions 回 prompt_tokens/completion_tokens，两种都认。
+type aiUsage struct {
+	mu    sync.Mutex
+	total aiTokenUsage
+}
+
+type aiUsageKey struct{}
+
+func withAIUsage(ctx context.Context, rec *aiUsage) context.Context {
+	return context.WithValue(ctx, aiUsageKey{}, rec)
+}
+
+func (u *aiUsage) add(respBody []byte) {
+	var out struct {
+		Usage *struct {
+			InputTokens        int `json:"input_tokens"`
+			OutputTokens       int `json:"output_tokens"`
+			PromptTokens       int `json:"prompt_tokens"`
+			CompletionTokens   int `json:"completion_tokens"`
+			InputTokensDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
+			PromptTokensDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+			OutputTokensDetails struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"output_tokens_details"`
+			CompletionTokensDetails struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
+		} `json:"usage"`
+	}
+	if json.Unmarshal(respBody, &out) != nil || out.Usage == nil {
+		return
+	}
+	v := out.Usage
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.total.Calls++
+	u.total.InputTokens += v.InputTokens + v.PromptTokens
+	u.total.OutputTokens += v.OutputTokens + v.CompletionTokens
+	u.total.CachedInputTokens += v.InputTokensDetails.CachedTokens + v.PromptTokensDetails.CachedTokens
+	u.total.ReasoningTokens += v.OutputTokensDetails.ReasoningTokens + v.CompletionTokensDetails.ReasoningTokens
+}
+
+func (u *aiUsage) snapshot() aiTokenUsage {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.total
 }
 
 // aiDecode 读 MiMo 响应：HTTP 出错、带 error 的报错，否则解进 out。

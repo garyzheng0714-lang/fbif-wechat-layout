@@ -140,7 +140,7 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		if !requirePublishSubmitOrAdmin(w, r, auth) {
 			return
 		}
-		status := currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), time.Now())
+		status := currentPublishMonitoring(p.store, p.foodTalksAuth.invalid(), p.flash.flashMonitoringFailures(), time.Now())
 		p.applyPublishEditReportMonitoring(&status)
 		writeJSON(w, http.StatusOK, status)
 	})

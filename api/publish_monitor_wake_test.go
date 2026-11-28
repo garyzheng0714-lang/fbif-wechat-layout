@@ -187,7 +187,7 @@ func TestMonitorWakeFollowsStoreWritesAndCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := testMonitorWake(t, server, func(now time.Time) publishMonitoringStatus {
-		return currentPublishMonitoring(store, auth.invalid(), now)
+		return currentPublishMonitoring(store, auth.invalid(), 0, now)
 	})
 	store.onWrite(w.notify)
 	auth.onFlip(w.notify)
@@ -228,17 +228,17 @@ func TestPublishMonitoringNextChangeIsWhenAlertsFlip(t *testing.T) {
 	}
 	at, _ := time.Parse(time.RFC3339, queued.UpdatedAt)
 	categories := func(now time.Time) []string {
-		return publishAlertCategories(currentPublishMonitoring(store, false, now).AlertIssues)
+		return publishAlertCategories(currentPublishMonitoring(store, false, 0, now).AlertIssues)
 	}
 
-	first := currentPublishMonitoring(store, false, at.Add(time.Minute))
+	first := currentPublishMonitoring(store, false, 0, at.Add(time.Minute))
 	if want := at.Add(publishQueueCriticalAfter + time.Second); !first.nextChange.Equal(want) {
 		t.Fatalf("排队满 15 分钟那一刻要重算：%v，应为 %v", first.nextChange, want)
 	}
 	if got := categories(first.nextChange.Add(-time.Second)); len(got) != 0 {
 		t.Fatalf("到点前不告警：%v", got)
 	}
-	second := currentPublishMonitoring(store, false, first.nextChange)
+	second := currentPublishMonitoring(store, false, 0, first.nextChange)
 	if got := publishAlertCategories(second.AlertIssues); !slices.Equal(got, []string{"queue_stale"}) {
 		t.Fatalf("到点就告警：%v", got)
 	}
@@ -251,7 +251,7 @@ func TestPublishMonitoringNextChangeIsWhenAlertsFlip(t *testing.T) {
 	}
 	failed, _ := store.byID(queued.ID)
 	failedAt, _ := time.Parse(time.RFC3339, failed.UpdatedAt)
-	status := currentPublishMonitoring(store, false, failedAt.Add(time.Hour))
+	status := currentPublishMonitoring(store, false, 0, failedAt.Add(time.Hour))
 	if want := failedAt.Add(publishRecentFailureWindow + time.Second); !status.nextChange.Equal(want) {
 		t.Fatalf("近期失败满 24 小时那一刻要重算：%v，应为 %v", status.nextChange, want)
 	}
@@ -262,7 +262,7 @@ func TestPublishMonitoringNextChangeIsWhenAlertsFlip(t *testing.T) {
 	if _, err := store.update(queued.ID, func(j *publishJob) { j.Stage = publishStagePublished }); err != nil {
 		t.Fatal(err)
 	}
-	if done := currentPublishMonitoring(store, false, time.Now()); !done.nextChange.IsZero() {
+	if done := currentPublishMonitoring(store, false, 0, time.Now()); !done.nextChange.IsZero() {
 		t.Fatalf("没有会随时间翻的事就不用重算：%v", done.nextChange)
 	}
 }

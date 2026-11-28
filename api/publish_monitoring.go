@@ -51,9 +51,11 @@ type publishMonitoringStatus struct {
 	// 7 天内连续推不出去、已放弃的任务状态推送（资讯订阅还有兜底回查，不是 P0）。
 	StatusCallbackDeadLetters int `json:"status_callback_dead_letters"`
 	// 官网首页轮播图连续 3 次没建成、或过了当天放弃的头条（publish_home_banner.go）。
-	HomeBannerFailed int      `json:"home_banner_failed"`
-	Issues           []string `json:"issues,omitempty"`
-	Warnings         []string `json:"warnings,omitempty"`
+	HomeBannerFailed int `json:"home_banner_failed"`
+	// 快讯没发成：落了失败的（7 天内），加上连着失败 3 次还在重试的（flash_pipeline.go）。
+	FlashFailed int      `json:"flash_failed"`
+	Issues      []string `json:"issues,omitempty"`
+	Warnings    []string `json:"warnings,omitempty"`
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
 	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
 	AlertIssues []string `json:"alert_issues"`
@@ -114,7 +116,8 @@ func (s *publishMonitoringStatus) changesWhenOlderThan(now time.Time, age int64,
 
 // credentialInvalid 来自最近一次 FoodTalks 鉴权结论：它不依赖任务积压，
 // 没有稿件在跑时凭证失效也要立刻告警。
-func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, now time.Time) publishMonitoringStatus {
+// flashFailed 是快讯任务里要找人的条数（flashPipeline.flashMonitoringFailures），没开快讯给 0。
+func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, flashFailed int, now time.Time) publishMonitoringStatus {
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -127,6 +130,7 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 		AlertHints:    map[string]publishMonitoringHint{},
 
 		FoodTalksCredentialInvalid: credentialInvalid,
+		FlashFailed:                flashFailed,
 	}
 	jobs, err := store.all()
 	if err != nil {
@@ -389,6 +393,9 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.HomeBannerFailed > 0, fmt.Sprintf("home_banner_failed:%d", status.HomeBannerFailed), publishMonitoringAlert,
 			publishMonitoringHint{"今天的头条发到 FoodTalks 了，官网首页轮播图连续 3 次没换上（或过了当天还没换上，已放弃）",
 				"看排版工具日志里「首页轮播图」那几行的原因；修好后对这篇调 POST /api/publish/jobs/{任务号}/home-banner 重跑，建过的不会建第二张"}},
+		{status.FlashFailed > 0, fmt.Sprintf("flash_failed:%d", status.FlashFailed), publishMonitoringAlert,
+			publishMonitoringHint{"有快讯连着 3 次没做成（取原文、写稿、检查或发到 FoodTalks），或 24 小时还没成、已放弃",
+				"调 GET /api/publish/flash-jobs/{编号} 看 error 和 failed_stage；修好后调 POST /api/publish/flash-jobs/{编号}/retry 重跑，发过的不会发第二条"}},
 	}
 	signals = append(signals, status.loginSignals()...)
 	appendPublishMonitoringSignals(status, signals)

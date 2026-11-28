@@ -303,6 +303,12 @@ func (p *publishPipeline) reviewCardAction(ctx context.Context, operatorOpenID, 
 
 // reviewCardActionWithForm formValue 是表单提交按钮带上来的字段（外发改稿用），其余按钮为 nil。
 func (p *publishPipeline) reviewCardActionWithForm(ctx context.Context, operatorOpenID, actionChatID string, rawValue json.RawMessage, formValue map[string]any) (out reviewCardOutcome) {
+	// 快讯卡的按钮（flash_card.go）同一个飞书应用、同一条长连接进来，按 action 前缀分走。
+	if p.flash != nil {
+		if flashOut, handled := p.flash.cardAction(operatorOpenID, actionChatID, rawValue, formValue); handled {
+			return flashOut
+		}
+	}
 	value, jobID, parseErr := parseReviewCardActionValue(rawValue)
 	if parseErr != nil {
 		return reviewCardOutcome{toastType: "error", toastContent: parseErr.Error()}

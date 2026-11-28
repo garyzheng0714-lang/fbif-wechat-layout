@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -150,9 +149,14 @@ func (c *foodTalksClient) SortBanner(ctx context.Context, id, sort int64) error 
 
 // bannerCall 发一次轮播图请求，按 FoodTalks 的老规矩判结果：HTTP 200 也要看 code，成功时交回 data。
 func (c *foodTalksClient) bannerCall(ctx context.Context, method, path string, body io.Reader) (json.RawMessage, error) {
+	return c.adminCall(ctx, "轮播图", method, path, body)
+}
+
+// adminCall 发一次 FoodTalks 后台请求（轮播图、快讯共用）：HTTP 200 也要看 code，成功时交回 data；what 只用在出错的说法里。
+func (c *foodTalksClient) adminCall(ctx context.Context, what, method, path string, body io.Reader) (json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
-		return nil, fmt.Errorf("foodtalks: 构造轮播图请求: %w", err)
+		return nil, fmt.Errorf("foodtalks: 构造%s请求: %w", what, err)
 	}
 	c.applyHeaders(req)
 	resp, err := c.do(req)
@@ -162,10 +166,10 @@ func (c *foodTalksClient) bannerCall(ctx context.Context, method, path string, b
 	defer resp.Body.Close()
 	respBody, err := readBoundedBody(resp.Body, 1<<20)
 	if err != nil {
-		return nil, fmt.Errorf("foodtalks: 读轮播图响应: %w", err)
+		return nil, fmt.Errorf("foodtalks: 读%s响应: %w", what, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, c.statusError("轮播图接口", resp.StatusCode, respBody)
+		return nil, c.statusError(what+"接口", resp.StatusCode, respBody)
 	}
 	var env struct {
 		Code int             `json:"code"`
@@ -173,13 +177,13 @@ func (c *foodTalksClient) bannerCall(ctx context.Context, method, path string, b
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return nil, fmt.Errorf("FoodTalks 轮播图响应不是预期 JSON（响应片段：%s）: %w", c.snippet(respBody), err)
+		return nil, fmt.Errorf("FoodTalks %s响应不是预期 JSON（响应片段：%s）: %w", what, c.snippet(respBody), err)
 	}
 	if env.Code != 0 {
 		return nil, &foodTalksAPIError{Code: env.Code, Msg: env.Msg}
 	}
 	if len(env.Data) == 0 {
-		return nil, errors.New("FoodTalks 轮播图响应缺 data")
+		return nil, fmt.Errorf("FoodTalks %s响应缺 data", what)
 	}
 	return env.Data, nil
 }

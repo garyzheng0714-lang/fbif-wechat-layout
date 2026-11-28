@@ -331,12 +331,12 @@ func TestHomeBannerFailuresAlertAfterThreeAndGiveUpAtMidnight(t *testing.T) {
 	env.site.listErr = errors.New("FoodTalks 轮播图接口异常（HTTP 502）")
 	for i := 0; i < 3; i++ {
 		env.pipeline.kickHomeBanners()
-		if status := currentPublishMonitoring(env.store, false, env.now); i < 2 && status.HomeBannerFailed != 0 {
+		if status := currentPublishMonitoring(env.store, false, 0, env.now); i < 2 && status.HomeBannerFailed != 0 {
 			t.Fatalf("第 %d 次失败还不该找人", i+1)
 		}
 		env.now = env.now.Add(time.Hour)
 	}
-	status := currentPublishMonitoring(env.store, false, env.now)
+	status := currentPublishMonitoring(env.store, false, 0, env.now)
 	if status.HomeBannerFailed != 1 || !containsString(status.AlertIssues, "home_banner_failed:1") {
 		t.Fatalf("连续 3 次没成应告警：%+v", status.AlertIssues)
 	}
@@ -351,7 +351,7 @@ func TestHomeBannerFailuresAlertAfterThreeAndGiveUpAtMidnight(t *testing.T) {
 	if len(env.site.creates) != 0 {
 		t.Fatal("一直失败不该建")
 	}
-	if status := currentPublishMonitoring(env.store, false, env.now.Add(25*time.Hour)); status.HomeBannerFailed != 0 {
+	if status := currentPublishMonitoring(env.store, false, 0, env.now.Add(25*time.Hour)); status.HomeBannerFailed != 0 {
 		t.Fatalf("放弃 24 小时后不再告警：%+v", status.AlertIssues)
 	}
 }

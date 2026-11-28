@@ -2,7 +2,7 @@
 
 > 读者：`FoodTalks_Feed`（资讯订阅，feed.foodtalks.cn）的开发者或维护它的 agent。
 > 2026-11-08 起。代码在 `api/publish_status_callback.go`，测试 `api/publish_status_callback_test.go`；改了代码要同步改这份。
-> 文章怎么交进来见 [发布接入契约](publish-intake-contract.md)，这一份只讲「交进来以后，状态怎么推回去」。
+> 文章怎么交进来见 [发布接入契约](publish-intake-contract.md)，这一份只讲「交进来以后，状态怎么推回去」。§1–§7 是文章任务；快讯任务（2026-11-29 起）见 §8，签名、重试、怎么回全都一样。
 
 ## 一句话
 
@@ -170,3 +170,87 @@ ok := hmac.Equal([]byte(sig), []byte(want))
 - 回调地址只能是资讯订阅自己的域名（§1），排版服务不会按调用方给的任意地址往外发请求。
 - 推送请求不带共享密钥本身（§3）。
 - 不跟跳转（§4）。
+
+## 8. 快讯任务的推送（2026-11-29 起）
+
+快讯从 `POST /api/publish/flash-sync` 交进来（[发布接入契约](publish-intake-contract.md) §10），带上 `status_callback_url` 就推。代码在 `api/flash_jobs.go`（摘要和事件类型）、`api/publish_status_callback.go`（发送器，和文章任务共用一个实现），测试 `api/flash_test.go`。
+
+### 8.1 推到哪
+
+**`https://feed.foodtalks.cn/api/internal/flash-status`**。资讯订阅的 `/api/internal/layout-status` 只认 `publish.job.status`，别的事件当场回 400，所以快讯不往那里推。地址规则和 §1 一样（只许资讯订阅的域名，最长 2048 字节，后登记的替换先登记的）。
+
+### 8.2 和文章任务一样的地方
+
+**签名完全一样**：同一把密钥 `PUBLISH_SYNC_SERVICE_TOKEN`，同一种 Standard Webhooks 签名（§3），同样的请求头、`User-Agent`、15 秒超时、不跟跳转；你回什么怎么算（§4）、重试和放弃（§5）、重启后补推、暂停写入时不推，也都一样。你现在验 `layout-status` 的那段验签代码可以原样用。
+
+### 8.3 不一样的地方
+
+| | 文章任务 | 快讯任务 |
+| --- | --- | --- |
+| `type` | `publish.job.status` | **`publish.flash.status`** |
+| `webhook-id` | `layout-job-<编号>-<版>` | **`layout-flash-<编号>-<版>`** |
+| `data.job_id` | 文章任务编号 | 快讯任务编号。**两边各编各的号，会重号**，按 `type` 分开存 |
+| `data.job` | `publishSyncJobSummary` | 下面这个结构 `flashJobSummary` |
+
+```json
+{
+  "type": "publish.flash.status",
+  "timestamp": "2026-11-29T02:10:00Z",
+  "data": {
+    "job_id": 12,
+    "seq": 6,
+    "job": {
+      "id": 12,
+      "article_id": "0e6a6bf3-…",
+      "source_url": "https://www.example.com/news/123",
+      "stage": "published",
+      "title": "乐乐茶全线降价超30%",
+      "foodtalks_flash_id": 1541,
+      "flash_url": "https://www.foodtalks.cn/flash/1541",
+      "published_at": "2026-11-29T02:10:00Z",
+      "reviewed_by": "ou_xxx",
+      "created_at": "2026-11-29T01:58:00Z",
+      "updated_at": "2026-11-29T02:10:00Z"
+    }
+  }
+}
+```
+
+| 字段 | 什么时候有 | 说明 |
+| --- | --- | --- |
+| `id` | 一直 | 快讯任务编号 |
+| `article_id` | 一直 | 你交进来的资讯编号，原样 |
+| `source_url` | 交的时候带了才有 | 你交进来的 `url` |
+| `stage` | 一直 | 见 §8.4 |
+| `title` | 稿子写出来以后 | 快讯标题；编辑在卡上改了字，这里跟着变（也会推一版） |
+| `foodtalks_flash_id` | **`published` 时一定有** | FoodTalks 快讯编号 |
+| `flash_url` | **`published` 时一定有** | FoodTalks 前台网址 `https://www.foodtalks.cn/flash/<编号>` |
+| `published_at` | `published` 时有 | 发上去的时刻（UTC） |
+| `reviewed_by` | `published`、`rejected` 时有 | 点按钮的人的飞书 open_id |
+| `skip_reason` | `skipped` 时有 | 为什么不写 |
+| `duplicate_of` | 认出网站已有同一件事时有 | 网站上已有的那条（快讯网址，或模型认出的资讯标题） |
+| `failed_stage`、`error` | `failed` 时有；重试中途也可能有 | 哪一步、什么原因 |
+| `created_at`、`updated_at` | 一直 | UTC，RFC3339 |
+
+请求体只有几百字节，不带稿子正文、检查结果、原文。要全文用 `GET /api/publish/flash-jobs/{id}`。
+
+### 8.4 `stage` 的取值
+
+| 取值 | 意思 | 之后 |
+| --- | --- | --- |
+| `queued` | 收下了 | → `writing` |
+| `writing` | 正在取原文、读规范、写稿 | → `checking`，或 `skipped` |
+| `checking` | 正在对原文、查风险（编辑在卡上改了字也回到这里重查） | → `awaiting_review` |
+| `awaiting_review` | 审核卡已发，等人点 | → `publishing`、`rejected`，或改字后回 `checking` |
+| `publishing` | 人点了通过，正在发到 FoodTalks | → `published`，或发布前查到同题的一条 → `skipped` |
+| `published` | **已发到 FoodTalks 快讯，前台看得到**（发完读回核对过才算） | 终态 |
+| `rejected` | 人在卡上点了驳回 | 终态。**不带理由**：卡上现在没有填理由的地方，只给 `reviewed_by`；要理由再加 |
+| `skipped` | 不写或不发，原因在 `skip_reason`（§8.3、接入契约 §10.4） | 终态 |
+| `failed` | 某一步出错放弃了，`failed_stage` 是哪一步 | 管理员重试后回到那一步 |
+
+出错重试的中途 `stage` 不变，`error` 会出现、消失，各推一版；你只需要看 `stage`。
+
+### 8.5 负载
+
+一条快讯从交进来到发布大约推 6–8 次。按每天交 10–20 篇算，每天 100–200 次请求，每次几百字节。
+

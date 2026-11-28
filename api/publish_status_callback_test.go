@@ -376,7 +376,7 @@ func TestStatusCallbackBacksOffThenGivesUp(t *testing.T) {
 	if stored.StatusCallback.State != publishStatusCallbackDeadLetter || !strings.Contains(stored.StatusCallback.Error, "HTTP 500") {
 		t.Fatalf("应记放弃：%+v", stored.StatusCallback)
 	}
-	monitoring := currentPublishMonitoring(env.store, false, clock.get())
+	monitoring := currentPublishMonitoring(env.store, false, 0, clock.get())
 	if !strings.Contains(strings.Join(monitoring.Warnings, ","), "status_callback_dead_letters:1") ||
 		strings.Contains(strings.Join(monitoring.Issues, ","), "status_callback") {
 		t.Fatalf("放弃的推送只给 warning：warnings=%v issues=%v", monitoring.Warnings, monitoring.Issues)
@@ -395,7 +395,7 @@ func TestStatusCallbackBacksOffThenGivesUp(t *testing.T) {
 	if stored.StatusCallback.State != "" || stored.StatusCallback.DeliveredSeq != 2 {
 		t.Fatalf("新的一版送达后应清掉放弃标记：%+v", stored.StatusCallback)
 	}
-	monitoring = currentPublishMonitoring(env.store, false, clock.get())
+	monitoring = currentPublishMonitoring(env.store, false, 0, clock.get())
 	if strings.Contains(strings.Join(monitoring.Warnings, ","), "status_callback") {
 		t.Fatalf("送达后不应再有 warning：%v", monitoring.Warnings)
 	}

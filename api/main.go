@@ -170,6 +170,8 @@ func main() {
 	publishPipe.deliverySettings = newPublishDeliverySettingsStore(publishDeliverySettingsPath(*rulesPath))
 	publishPipe.editReports = newPublishEditReportStore(publishEditReportPath(publishDeliverySettingsPath(*rulesPath)))
 	publishPipe.publicDir = publicDir
+	// 快讯（flash_pipeline.go）：中台 FLASH_ENABLED 开了才装，没开时入口回 503。
+	publishPipe.flash = newFlashPipelineFromEnv(publishPipe, authService, publishPath)
 	publishPipe.enableBoundedWorkers(4, 128)
 	if !feishuReviewerAllowlistConfigured() {
 		log.Printf("publish: FEISHU_REVIEWER_OPEN_IDS 未配置；卡片审核仅在群成员模式与审核群均已配置时可用，否则 fail closed")
@@ -184,6 +186,7 @@ func main() {
 		log.Printf("publish: 候选部署暂停态，跳过任务恢复、通知 outbox、状态推送与飞书长连接")
 	} else {
 		publishPipe.startPublishMonitorWake()
+		publishPipe.flash.recover()
 		publishPipe.recoverJobs()
 		publishStore.statusCallbacks.startSending()
 		publishPipe.startCMSPublicationSync()
@@ -191,6 +194,7 @@ func main() {
 		publishPipe.startPublishEditReport()
 	}
 	registerPublishRoutes(mux, publishPipe, authService)
+	registerFlashRoutes(mux, publishPipe, authService)
 	// 飞书回调传输层必须显式互斥；缺失/非法配置安全回落 websocket 行为，公网
 	// Webhook 精确返回 404，但 readiness=false，防止部署在含糊配置下假绿。
 	feishuMode, feishuModeExplicit := registerConfiguredFeishuCallbackRoute(mux, publishPipe)

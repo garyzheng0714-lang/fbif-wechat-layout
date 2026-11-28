@@ -759,7 +759,7 @@ func TestReviewCardRedrawSettlesExternalCardDeadLetter(t *testing.T) {
 	if got := mustJob(t, env, requeued.ID); got.ExternalDistributionCardState != publishExternalCardPending || got.ExternalDistributionCardSeq != 6 {
 		t.Fatalf("又排了新更新的不碰：state=%q seq=%d", got.ExternalDistributionCardState, got.ExternalDistributionCardSeq)
 	}
-	status := currentPublishMonitoring(env.store, false, time.Now())
+	status := currentPublishMonitoring(env.store, false, 0, time.Now())
 	if status.NotificationDeadLetters != 0 {
 		t.Fatalf("死信收掉后不再告警：%+v", status)
 	}

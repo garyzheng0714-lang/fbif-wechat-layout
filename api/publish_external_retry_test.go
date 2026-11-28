@@ -41,7 +41,7 @@ func TestExternalAutoRetryRepushesFailedLane(t *testing.T) {
 	if !strings.Contains(body, "10:10 自动重试；分发工具没存草稿：第 1 张图 5.6MB，超过 5MB") {
 		t.Fatalf("卡片写几点自己重试: %s", body)
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now); status.Failed != 0 || status.FailedRecent != 0 {
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now); status.Failed != 0 || status.FailedRecent != 0 {
 		t.Fatalf("系统还会自己重试的不告警：%+v", status)
 	}
 
@@ -129,7 +129,7 @@ func TestExternalAutoRetryHeldDraftAlertsAfterThreeMismatches(t *testing.T) {
 		if lane.State != publishExternalDistributionDraftSaved || lane.AutoRetries != retries {
 			t.Fatalf("第 %d 次重推后还停在草稿：%+v", retries, lane)
 		}
-		status := currentPublishMonitoring(env.store, false, clock.now)
+		status := currentPublishMonitoring(env.store, false, 0, clock.now)
 		if alert := slices.ContainsFunc(status.AlertIssues, func(a string) bool { return strings.HasPrefix(a, "failed_jobs_recent:") }); alert != (retries >= 3) {
 			t.Fatalf("重推 %d 次后：前 3 次不告警、3 次都对不上才告警：%+v", retries, status)
 		}
@@ -169,7 +169,7 @@ func TestExternalAutoRetryBacksOffThenDailyForAWeek(t *testing.T) {
 		if !ok {
 			break
 		}
-		if status := currentPublishMonitoring(env.store, false, clock.now); (status.Failed != 0) != (lane.AutoRetries >= 3) {
+		if status := currentPublishMonitoring(env.store, false, 0, clock.now); (status.Failed != 0) != (lane.AutoRetries >= 3) {
 			t.Fatalf("第 %d 次重推之后：前 3 次不告警、用完才告警：%+v", lane.AutoRetries, status)
 		}
 		clock.now = at
@@ -185,7 +185,7 @@ func TestExternalAutoRetryBacksOffThenDailyForAWeek(t *testing.T) {
 	if len(robot.saves) != 1+len(pushed) {
 		t.Fatalf("过了 7 天不再推：%d", len(robot.saves))
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now); status.Failed != 1 {
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now); status.Failed != 1 {
 		t.Fatalf("不再推的照常算失败：%+v", status)
 	}
 	body := distributionSectionJSON(t, buildReviewDoneCard(mustJob(t, env, job.ID)))
@@ -212,7 +212,7 @@ func TestExternalAutoRetryLeavesAlone(t *testing.T) {
 	if len(robot.saves) != 1 {
 		t.Fatalf("取消了自动外发的号不再自己推：%d", len(robot.saves))
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now); status.Failed != 1 {
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now); status.Failed != 1 {
 		t.Fatalf("不会再自己推的照常算失败：%+v", status)
 	}
 
@@ -265,7 +265,7 @@ func TestExternalLoginRequiredWaitsForLogin(t *testing.T) {
 	wantAlert := "external_login_required:baijiahao:2"
 	checkWaiting := func(when string) {
 		t.Helper()
-		status := currentPublishMonitoring(env.store, false, clock.now)
+		status := currentPublishMonitoring(env.store, false, 0, clock.now)
 		hint := status.AlertHints[wantAlert]
 		if fmt.Sprint(status.AlertIssues) != "["+wantAlert+"]" || status.FailedRecent != 0 || status.Failed != 0 ||
 			!strings.Contains(hint.Meaning, fmt.Sprintf("2 篇原创停着没同步（#%d、#%d）", jobs[0].ID, jobs[1].ID)) ||
@@ -296,7 +296,7 @@ func TestExternalLoginRequiredWaitsForLogin(t *testing.T) {
 	if len(robot.saves) != 2 {
 		t.Fatalf("晚上不推：%d", len(robot.saves))
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now); len(status.AlertIssues) != 0 || status.Failed != 0 {
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now); len(status.AlertIssues) != 0 || status.Failed != 0 {
 		t.Fatalf("登好了、等着推的不告警：%+v", status)
 	}
 	clock.set("2026-11-21 09:00")
@@ -310,7 +310,7 @@ func TestExternalLoginRequiredWaitsForLogin(t *testing.T) {
 	if len(robot.saves) != 4 {
 		t.Fatalf("两篇各推一次：%d", len(robot.saves))
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now); len(status.AlertIssues) != 0 {
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now); len(status.AlertIssues) != 0 {
 		t.Fatalf("推出去了告警清掉：%+v", status)
 	}
 }

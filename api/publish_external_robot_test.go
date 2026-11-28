@@ -205,7 +205,7 @@ func TestRobotAutoLaneSavesPublishesAndBringsBackLink(t *testing.T) {
 	if !strings.Contains(body, "<font color='blue'>平台审核中</font>") || strings.Contains(body, feishuCardActionDistributeExternal) {
 		t.Fatalf("审核中写清楚、不给按钮: %s", body)
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now.Add(time.Hour)); status.Processing != 0 || status.OldestExternalReviewingAgeSeconds != 3600 ||
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now.Add(time.Hour)); status.Processing != 0 || status.OldestExternalReviewingAgeSeconds != 3600 ||
 		publishMonitoringHasIssue(publishMonitoringStatus{Issues: status.Warnings}, "external_reviewing_slow:") || len(status.AlertIssues) != 0 {
 		t.Fatalf("平台审核中不算处理中，一小时也不报：%+v", status)
 	}
@@ -232,7 +232,7 @@ func TestRobotAutoLaneSavesPublishesAndBringsBackLink(t *testing.T) {
 	if len(robot.gets) != 2 || len(robot.publishes) != 1 || len(robot.saves) != 1 {
 		t.Fatalf("已发布就不再查、不再发：gets=%v publishes=%v saves=%d", robot.gets, robot.publishes, len(robot.saves))
 	}
-	if status := currentPublishMonitoring(env.store, false, clock.now.Add(time.Hour)); status.Processing != 0 || status.Failed != 0 || status.ReconciliationRequired != 0 {
+	if status := currentPublishMonitoring(env.store, false, 0, clock.now.Add(time.Hour)); status.Processing != 0 || status.Failed != 0 || status.ReconciliationRequired != 0 {
 		t.Fatalf("已发布是终态：%+v", status)
 	}
 }
@@ -298,7 +298,7 @@ func TestRobotLaneFreezesDraftBeforeSavingThenPublishes(t *testing.T) {
 		!strings.Contains(body, "**头条号**　[查看文章]("+testRobotArticleURL("toutiao", testRobotArticleID)+")") {
 		t.Fatalf("卡片两个平台都给「查看文章」: %s", body)
 	}
-	status := currentPublishMonitoring(env.store, false, time.Now())
+	status := currentPublishMonitoring(env.store, false, 0, time.Now())
 	if status.Processing != 0 || status.Failed != 0 || status.ReconciliationRequired != 0 || status.ExternalFidelityMismatches != 0 || status.ExternalFidelityUnavailable != 0 {
 		t.Fatalf("已发布是终态，不算处理中或失败：%+v", status)
 	}
@@ -354,7 +354,7 @@ func TestRobotLaneHoldsDraftThatDoesNotMatch(t *testing.T) {
 	if strings.Contains(body, feishuCardActionDistributeExternal) {
 		t.Fatalf("停在草稿不给按钮（内容已在那篇草稿里，要人去平台改）: %s", body)
 	}
-	if status := currentPublishMonitoring(env.store, false, time.Now()); status.ExternalFidelityMismatches != 1 || status.Processing != 0 {
+	if status := currentPublishMonitoring(env.store, false, 0, time.Now()); status.ExternalFidelityMismatches != 1 || status.Processing != 0 {
 		t.Fatalf("对不上照旧报 fidelity mismatch：%+v", status)
 	}
 	env.pipeline.recoverExternalDistribution(got)

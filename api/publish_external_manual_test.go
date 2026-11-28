@@ -157,11 +157,11 @@ func TestPublishMonitoringSkipsManualAccounts(t *testing.T) {
 	live := testManualAccount(testManualHomepage)
 	live.Status = externalAccountLive
 	setTestExternalAccounts(t, live)
-	if before := currentPublishMonitoring(store, false, failedAt.Add(time.Hour)); before.Ready {
+	if before := currentPublishMonitoring(store, false, 0, failedAt.Add(time.Hour)); before.Ready {
 		t.Fatalf("号还在用时没推成要报：%+v", before)
 	}
 	setTestExternalAccounts(t, testManualAccount(testManualHomepage))
-	after := currentPublishMonitoring(store, false, failedAt.Add(time.Hour))
+	after := currentPublishMonitoring(store, false, 0, failedAt.Add(time.Hour))
 	if !after.Ready || after.FailedRecent != 0 || publishMonitoringHasIssue(after, "external_login_required") {
 		t.Fatalf("改成人工发以后不算失败、不报没登录：%+v", after)
 	}

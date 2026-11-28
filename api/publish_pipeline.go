@@ -198,6 +198,8 @@ type publishPipeline struct {
 	robotPublishing sync.Map
 	// 校对提醒串行复核与发送（publish_proofread.go）。
 	proofreadReminderMu sync.Mutex
+	// 快讯这条线（flash_pipeline.go）：没开（FLASH_ENABLED）时 nil，入口回 503。
+	flash *flashPipeline
 	// 官网首页轮播图（publish_home_banner.go）：nil 时不建；同一时间只跑一轮，homeBannerWakeAt 是约好的下一轮。
 	homeBanners      func() (foodTalksBannerAPI, error)
 	homeBannerMu     sync.Mutex
