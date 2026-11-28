@@ -333,6 +333,7 @@ curl http://127.0.0.1:9000/api/health
 | `POST` | `/api/publish/jobs/{id}/repair-wechat-trailer` | 对单篇已公开稿按当前规则切除微信导流尾并覆盖 FoodTalks，不重开审核 |
 | `POST` | `/api/publish/repair-wechat-trailer` | 扫描并修复流水线可安全覆盖的已公开泄漏稿；CMS 人工稿优先 |
 | `POST` | `/api/publish/jobs/{id}/sync-wechat-meta` | 已公开稿的封面/摘要与公众号对齐，只替换没人手改过的字段 |
+| `POST` | `/api/publish/jobs/{id}/home-banner` | FBIF食品饮料创新的头条补建 FoodTalks 官网首页轮播图（不看是不是当天，建过的不建第二张），见 [docs/foodtalks-home-banner.md](docs/foodtalks-home-banner.md) |
 | `POST` | `/api/publish/news/{id}/repair-links` | 按资讯 id 补链接（流水线稿与编辑手工稿都行）：系列声明/合集链→系列标签页，Mote 公众号文章链→站内稿；判定是转载、文末却写成 FBIF 原创的换掉这句，网站上标着原创的来源类型、来源、分类一起改成转载，明说了 FBIF 原创却标着转载的改回原创；只链已有标签，`?dry_run=1` 只报告 |
 | `POST` | `/api/publish/jobs/{id}/retry-external-distribution` | 管理员确认待核对的平台草稿箱里没有这篇（或已删掉）后，只为待核对的平台按当前网站稿重新存草稿 |
 | `POST` | `/api/publish/external-distribution/auto-backfill` | 把 `since`（RFC3339）之后公开、还有 auto 账号没有记录的原创记为补发待办，按各平台补发配额逐日推送；`dry_run:true` 只列名单 |

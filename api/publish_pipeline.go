@@ -198,6 +198,10 @@ type publishPipeline struct {
 	robotPublishing sync.Map
 	// 校对提醒串行复核与发送（publish_proofread.go）。
 	proofreadReminderMu sync.Mutex
+	// 官网首页轮播图（publish_home_banner.go）：nil 时不建；同一时间只跑一轮，homeBannerWakeAt 是约好的下一轮。
+	homeBanners      func() (foodTalksBannerAPI, error)
+	homeBannerMu     sync.Mutex
+	homeBannerWakeAt time.Time
 	// 以下两个仅测试注入：校对提醒的发送与复核（默认走审核应用与 MiMo Pro）。
 	proofreadReminderSender func(ctx context.Context, job publishJob, chatID string, post map[string]any) (string, error)
 	proofreadVerify         func(ctx context.Context, job publishJob, candidates []publishRiskItem) (string, string, error)
@@ -349,6 +353,14 @@ func newPublishPipeline(store *publishJobStore, rules *rulePresetStore) *publish
 		now:                        time.Now,
 	}
 	p.foodTalks = func() (foodTalksAPI, error) {
+		c, err := newFoodTalksClientFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		c.authHealth = p.foodTalksAuth
+		return c, nil
+	}
+	p.homeBanners = func() (foodTalksBannerAPI, error) {
 		c, err := newFoodTalksClientFromEnv()
 		if err != nil {
 			return nil, err
@@ -1339,7 +1351,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 		j.PublishedAt = publishedAt.Format(time.RFC3339)
 		j.UnpublishWindowUntil = publishWindowUntil(publishedAt, j.UnpublishWindowHours)
 		enqueuePublishNotification(j, publishNotificationPublished)
-		markExternalAutoDistributionPending(j)
+		markPublishedFollowUps(j, publishedAt)
 	})
 	if err != nil || !swapped {
 		if latest, loadErr := p.store.byID(job.ID); loadErr == nil && latest.Stage == publishStagePublished {
@@ -1357,7 +1369,7 @@ func (p *publishPipeline) stagePublicize(ctx context.Context, job publishJob) er
 	}
 	p.schedulePublishNotification(job.ID)
 	p.recordPublishedRepost(ctx, updated)
-	p.kickExternalAutoDistribution()
+	p.kickPublishedFollowUps()
 	return nil
 }
 
@@ -1642,6 +1654,8 @@ func (p *publishPipeline) recoverJobs() {
 				"进程在重新发布 UpdateNews 调用窗口中断，外部结果不确定，启动时禁止自动重放")
 		}
 	}
+	// 上次没做完的首页轮播图接着做（建过没记上的，先按链接找到再沿用）。
+	p.kickHomeBanners()
 }
 
 func (p *publishPipeline) queueRiskBackfill(jobID int64, expectedStage string) {
@@ -1756,7 +1770,7 @@ func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, conf
 			j.ArticleURL = siteFrontURL() + "/news/" + strconv.FormatInt(j.FoodTalksNewsID, 10)
 			j.Stage = publishStagePublished
 			enqueuePublishNotification(j, publishNotificationPublished)
-			markExternalAutoDistributionPending(j)
+			markPublishedFollowUps(j, pipelineNow(p))
 			return
 		}
 		j.Stage = publishStagePublicizing
@@ -1772,7 +1786,7 @@ func (p *publishPipeline) reconcilePublicize(jobID int64, confirmPublished, conf
 	}
 	if confirmPublished {
 		p.schedulePublishNotification(job.ID)
-		p.kickExternalAutoDistribution()
+		p.kickPublishedFollowUps()
 		return job, nil
 	}
 	p.spawn(func() { p.runJob(jobID) })

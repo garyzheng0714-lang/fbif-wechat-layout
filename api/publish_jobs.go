@@ -233,6 +233,8 @@ type publishJob struct {
 	// 居中裁出，thumbFeishuCoverJPEG）。由建聚合卡前的 prepareReviewThumbs 按需补传，
 	// 失败时聚合卡退回 ReviewCoverImgKey（补成正方形的横版封面）。
 	ReviewThumbImgKey string `json:"review_thumb_img_key,omitempty"`
+	// HomeBanner 这篇当 FoodTalks 官网首页轮播图的记录（只有 FBIF食品饮料创新的头条有，publish_home_banner.go）。
+	HomeBanner publishHomeBanner `json:"home_banner,omitzero"`
 	// StatusCallback 资讯订阅登记的回调：状态（sync-status 那份摘要）每变一次推一次（publish_status_callback.go）。
 	StatusCallback publishStatusCallback `json:"status_callback,omitzero"`
 	CreatedAt      string                `json:"created_at"`

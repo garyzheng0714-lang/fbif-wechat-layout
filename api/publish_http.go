@@ -778,6 +778,27 @@ func registerPublishRoutes(mux *http.ServeMux, p *publishPipeline, authServices 
 		writeJSON(w, http.StatusOK, map[string]any{"result": res})
 	})
 
+	// FBIF食品饮料创新的头条补建官网首页轮播图（上线当天补跑、失败后重跑）：不看是不是当天，
+	// 建过的原样返回、不建第二张；接受后在后台做，结果看 GET /api/publish/jobs/{id} 的 home_banner。
+	mux.HandleFunc("POST /api/publish/jobs/{id}/home-banner", func(w http.ResponseWriter, r *http.Request) {
+		if !requirePublishAdmin(w, r, auth) {
+			return
+		}
+		if !requireDeploymentWritesActive(w) {
+			return
+		}
+		id, ok := publishJobIDFromPath(w, r)
+		if !ok {
+			return
+		}
+		job, err := p.requestHomeBanner(id)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "home_banner": job.HomeBanner})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "home_banner": job.HomeBanner})
+	})
+
 	// 已发布稿按公众号原文重排并覆盖同一篇 FoodTalks 稿，与卡片「重新同步至FoodTalks」同一条路径
 	// （FoodTalks 后台有人改过正文就停）；给卡片已过 14 天点不了的旧稿用。?dry_run=1 只报告能不能同步。
 	mux.HandleFunc("POST /api/publish/jobs/{id}/source-resync", func(w http.ResponseWriter, r *http.Request) {

@@ -129,7 +129,7 @@ func (p *publishPipeline) ackManualCMSPublication(ctx context.Context, jobID int
 		j.PublicationActor = ""
 		j.PublicationActionAt = publishedAt.Format(time.RFC3339)
 		cancelPublishNotification(j)
-		markExternalAutoDistributionPending(j)
+		markPublishedFollowUps(j, publishedAt)
 	})
 	if err != nil {
 		return job, err
@@ -148,7 +148,7 @@ func (p *publishPipeline) ackManualCMSPublication(ctx context.Context, jobID int
 		}
 		return latest, fmt.Errorf("任务当前阶段（%s）不能记为后台已发布", latest.Stage)
 	}
-	p.kickExternalAutoDistribution()
+	p.kickPublishedFollowUps()
 	refreshed, refreshErr := p.refreshReviewCard(ctx, updated.ID, false)
 	if refreshErr != nil {
 		return updated, fmt.Errorf("已记为后台发布，但刷新群卡片失败: %w", refreshErr)

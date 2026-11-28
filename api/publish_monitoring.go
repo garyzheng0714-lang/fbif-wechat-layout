@@ -49,9 +49,11 @@ type publishMonitoringStatus struct {
 	ExternalFidelityMismatches         int   `json:"external_fidelity_mismatches"`
 	ExternalFidelityUnavailable        int   `json:"external_fidelity_unavailable"`
 	// 7 天内连续推不出去、已放弃的任务状态推送（资讯订阅还有兜底回查，不是 P0）。
-	StatusCallbackDeadLetters int      `json:"status_callback_dead_letters"`
-	Issues                    []string `json:"issues,omitempty"`
-	Warnings                  []string `json:"warnings,omitempty"`
+	StatusCallbackDeadLetters int `json:"status_callback_dead_letters"`
+	// 官网首页轮播图连续 3 次没建成、或过了当天放弃的头条（publish_home_banner.go）。
+	HomeBannerFailed int      `json:"home_banner_failed"`
+	Issues           []string `json:"issues,omitempty"`
+	Warnings         []string `json:"warnings,omitempty"`
 	// alert_issues 必须始终出现在 JSON 里。省略空数组时，外部看门狗会退回
 	// 把 issues 当 P0，于是正常处理中的稿也会被喊成事故。
 	AlertIssues []string `json:"alert_issues"`
@@ -152,6 +154,12 @@ func currentPublishMonitoring(store *publishJobStore, credentialInvalid bool, no
 		}
 		if statusCallbackDeadLetterRecent(job, now) {
 			status.StatusCallbackDeadLetters++
+		}
+		if failing, clears := homeBannerFailing(job, now); failing {
+			status.HomeBannerFailed++
+			if !clears.IsZero() && (status.nextChange.IsZero() || clears.Before(status.nextChange)) {
+				status.nextChange = clears
+			}
 		}
 	}
 	finalizePublishMonitoring(&status)
@@ -378,6 +386,9 @@ func finalizePublishMonitoring(status *publishMonitoringStatus) {
 		{status.ExternalFidelityMismatches > 0, fmt.Sprintf("external_fidelity_mismatch:%d", status.ExternalFidelityMismatches), publishMonitoringWarning, publishMonitoringHint{}},
 		{status.ExternalFidelityUnavailable > 0, fmt.Sprintf("external_fidelity_unavailable:%d", status.ExternalFidelityUnavailable), publishMonitoringWarning, publishMonitoringHint{}},
 		{status.StatusCallbackDeadLetters > 0, fmt.Sprintf("status_callback_dead_letters:%d", status.StatusCallbackDeadLetters), publishMonitoringWarning, publishMonitoringHint{}},
+		{status.HomeBannerFailed > 0, fmt.Sprintf("home_banner_failed:%d", status.HomeBannerFailed), publishMonitoringAlert,
+			publishMonitoringHint{"今天的头条发到 FoodTalks 了，官网首页轮播图连续 3 次没换上（或过了当天还没换上，已放弃）",
+				"看排版工具日志里「首页轮播图」那几行的原因；修好后对这篇调 POST /api/publish/jobs/{任务号}/home-banner 重跑，建过的不会建第二张"}},
 	}
 	signals = append(signals, status.loginSignals()...)
 	appendPublishMonitoringSignals(status, signals)
